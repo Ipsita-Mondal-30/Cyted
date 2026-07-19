@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AnalysisStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id        String   @id @db.Uuid
+  email     String
+  name      String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company?
+  analyses  AnalysisJob[]
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  userId      String   @unique @db.Uuid
+  name        String
+  website     String?
+  description String?
+  competitors Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses  AnalysisJob[]
+}
+
+model AnalysisJob {
+  id              String         @id @default(cuid())
+  userId          String         @db.Uuid
+  companyId       String
+  companyName     String
+  website         String?
+  description     String?
+  competitors     Json           @default("[]")
+  status          AnalysisStatus @default(QUEUED)
+  progress        Int            @default(0)
+  progressMessage String?
+  error           String?
+  warnings        Json           @default("[]")
+  companyContext  Json?
+  createdAt       DateTime       @default(now())
+  completedAt     DateTime?
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  prompts         Prompt[]
+  responses       Response[]
+  metrics         Metrics?
+  recommendation  Recommendation?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Prompt {
+  id         String   @id @default(cuid())
+  analysisId String
+  category   String
+  prompt     String
+  createdAt  DateTime @default(now())
+
+  analysis  AnalysisJob @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  responses Response[]
+
+  @@index([analysisId])
+}
+
+model Response {
+  id          String   @id @default(cuid())
+  analysisId  String
+  promptId    String
+  provider    String
+  model       String
+  rawResponse String?
+  latencyMs   Int?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  analysis  AnalysisJob      @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  prompt    Prompt           @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  extracted ExtractedResult?
+
+  @@index([analysisId])
+  @@index([promptId])
+}
+
+model ExtractedResult {
+  id               String   @id @default(cuid())
+  responseId       String   @unique
+  mentionedBrands  Json     @default("[]")
+  mentionedProducts Json    @default("[]")
+  citations        Json     @default("[]")
+  ranking          Int?
+  reasoning        String?
+  sentiment        String?
+  createdAt        DateTime @default(now())
+
+  response Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model Metrics {
+  id                  String   @id @default(cuid())
+  analysisId          String   @unique
+  visibilityScore     Float
+  mentionRate         Float
+  shareOfVoice        Float
+  citationRate        Float
+  recommendationRate  Float
+  avgRanking          Float?
+  competitorShare     Json     @default("{}")
+  createdAt           DateTime @default(now())
+
+  analysis AnalysisJob @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+}
+
+model Recommendation {
+  id         String   @id @default(cuid())
+  analysisId String   @unique
+  content    String
+  createdAt  DateTime @default(now())
+
+  analysis AnalysisJob @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+}

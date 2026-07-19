@@ -1,0 +1,41 @@
+{
+  "name": "cyted",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "worker": "tsx --env-file=.env src/workers/analysis.worker.ts",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.0",
+    "@prisma/client": "^6.5.0",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.49.1",
+    "bullmq": "^5.41.0",
+    "ioredis": "^5.5.0",
+    "next": "16.2.10",
+    "openai": "^4.89.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^16.4.7",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "prisma": "^6.5.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.3",
+    "typescript": "^5"
+  }
+}

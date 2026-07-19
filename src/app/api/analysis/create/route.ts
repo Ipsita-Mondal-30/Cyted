@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { createLogger } from "@/lib/logger";
 import { enqueueAnalysis } from "@/queue/queue";
+
+const log = createLogger("api:create");
 
 const bodySchema = z.object({
   companyName: z.string().min(1, "Company name is required"),
@@ -18,6 +21,7 @@ export async function POST(request: Request) {
     const parsed = bodySchema.safeParse(json);
 
     if (!parsed.success) {
+      log.warn("Invalid create body", parsed.error.flatten());
       return NextResponse.json(
         { error: parsed.error.issues[0]?.message || "Invalid body" },
         { status: 400 }
@@ -30,6 +34,12 @@ export async function POST(request: Request) {
     const competitors = (parsed.data.competitors || [])
       .map((c) => c.trim())
       .filter(Boolean);
+
+    log.info("Creating analysis", {
+      userId: user.id,
+      companyName,
+      competitors,
+    });
 
     const company = await prisma.company.upsert({
       where: { userId: user.id },
@@ -47,6 +57,7 @@ export async function POST(request: Request) {
         competitors,
       },
     });
+    log.info("Company upserted", { companyId: company.id, userId: user.id });
 
     const analysis = await prisma.analysisJob.create({
       data: {
@@ -58,18 +69,28 @@ export async function POST(request: Request) {
         competitors,
         status: "QUEUED",
         progress: 0,
-        progressMessage: "Queued",
+        progressMessage: "Queued — waiting for worker",
       },
+    });
+    log.info("AnalysisJob created", {
+      analysisId: analysis.id,
+      status: analysis.status,
     });
 
     await enqueueAnalysis(analysis.id);
+    log.info("Analysis handed to BullMQ — ensure `npm run worker` is running", {
+      analysisId: analysis.id,
+    });
 
     return NextResponse.json({ jobId: analysis.id });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("[create analysis]", error);
+    log.error("Failed to create analysis", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create analysis" },
       { status: 500 }

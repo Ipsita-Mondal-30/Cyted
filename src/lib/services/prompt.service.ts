@@ -1,6 +1,9 @@
 import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
-import { requireGemini } from "@/lib/providers/provider-manager";
+import { createLogger } from "@/lib/logger";
+import { completePreferringGemini } from "@/lib/providers/provider-manager";
+
+const log = createLogger("service:prompt");
 
 export type CompanyContext = {
   industry: string;
@@ -29,8 +32,8 @@ export async function buildCompanyContext(input: {
   description?: string | null;
   competitors: string[];
 }): Promise<CompanyContext> {
-  const gemini = requireGemini();
-  const raw = await gemini.complete(
+  log.info("Building company context", { companyName: input.companyName });
+  const { text: raw, provider, model } = await completePreferringGemini(
     "You are helping generate realistic AI search prompts. Return JSON only. No markdown.",
     `Using the information below, build a structured company profile.
 
@@ -47,9 +50,14 @@ Return JSON only with keys:
 - useCases (string array)
 - keywords (string array)`
   );
+  log.info("Company context LLM response received", {
+    provider,
+    model,
+    chars: raw.length,
+  });
 
   const parsed = extractJson<Partial<CompanyContext>>(raw);
-  return {
+  const context: CompanyContext = {
     industry: parsed.industry || "Unknown",
     products: parsed.products || [],
     services: parsed.services || [],
@@ -57,6 +65,12 @@ Return JSON only with keys:
     useCases: parsed.useCases || [],
     keywords: parsed.keywords || [],
   };
+  log.info("Parsed company context", {
+    industry: context.industry,
+    products: context.products.length,
+    keywords: context.keywords.length,
+  });
+  return context;
 }
 
 export async function generateAndStorePrompts(
@@ -65,11 +79,16 @@ export async function generateAndStorePrompts(
   context: CompanyContext
 ): Promise<number> {
   const config = getConfig();
-  const gemini = requireGemini();
   const categories = config.promptCategories;
   const perCategory = config.promptsPerCategory;
 
-  const raw = await gemini.complete(
+  log.info("Generating prompts", {
+    analysisId,
+    categories,
+    perCategory,
+    expectedTotal: categories.length * perCategory,
+  });
+  const { text: raw, provider, model } = await completePreferringGemini(
     "You generate realistic consumer/buyer prompts that people type into AI assistants. Return JSON only.",
     `Generate exactly ${perCategory} realistic prompts for EACH category below.
 The prompts should be natural questions someone might ask an AI when researching products/services related to this company and industry.
@@ -89,6 +108,12 @@ ${categories.map((c) => `- ${c}`).join("\n")}
 Return JSON object where each key is a category name and each value is an array of exactly ${perCategory} prompt strings.
 Example shape: { "${categories[0]}": ["...", "..."], ... }`
   );
+  log.info("Prompt generation LLM response received", {
+    analysisId,
+    provider,
+    model,
+    chars: raw.length,
+  });
 
   const parsed = extractJson<Record<string, string[]>>(raw);
   const rows: { analysisId: string; category: string; prompt: string }[] = [];
@@ -100,7 +125,6 @@ Example shape: { "${categories[0]}": ["...", "..."], ... }`
         rows.push({ analysisId, category, prompt: prompt.trim() });
       }
     }
-    // Fill gaps if model returned fewer than requested
     while (rows.filter((r) => r.category === category).length < perCategory) {
       rows.push({
         analysisId,
@@ -111,5 +135,13 @@ Example shape: { "${categories[0]}": ["...", "..."], ... }`
   }
 
   await prisma.prompt.createMany({ data: rows });
+  log.info("Stored prompts", {
+    analysisId,
+    count: rows.length,
+    byCategory: categories.map((c) => ({
+      category: c,
+      count: rows.filter((r) => r.category === c).length,
+    })),
+  });
   return rows.length;
 }

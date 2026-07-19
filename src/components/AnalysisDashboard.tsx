@@ -122,17 +122,27 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
       </div>
 
       {!isDone && !isFailed && (
-        <div>
-          <div className="mb-2 flex justify-between text-sm text-stone-600">
-            <span>Progress</span>
-            <span>{progress}%</span>
+        <div className="space-y-3">
+          <div>
+            <div className="mb-2 flex justify-between text-sm text-stone-600">
+              <span>Progress</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+              <div
+                className="h-full rounded-full bg-emerald-600 transition-all duration-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-stone-200">
-            <div
-              className="h-full rounded-full bg-emerald-600 transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          {status?.status === "QUEUED" && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Job is queued. If this doesn&apos;t start within a few seconds, run{" "}
+              <code className="rounded bg-amber-100 px-1">npm run worker</code> in
+              a second terminal — the dashboard only polls; the worker processes
+              the analysis.
+            </p>
+          )}
         </div>
       )}
 

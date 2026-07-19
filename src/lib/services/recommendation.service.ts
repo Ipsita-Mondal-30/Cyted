@@ -1,13 +1,8 @@
 import { prisma } from "@/lib/db";
-import { getEnabledProviders, requireGemini } from "@/lib/providers/provider-manager";
+import { createLogger } from "@/lib/logger";
+import { completePreferringGemini } from "@/lib/providers/provider-manager";
 
-function getRecommender() {
-  try {
-    return requireGemini();
-  } catch {
-    return getEnabledProviders()[0];
-  }
-}
+const log = createLogger("service:recommendation");
 
 export async function generateAndStoreRecommendations(
   analysisId: string,
@@ -26,8 +21,8 @@ export async function generateAndStoreRecommendations(
   const categories = [...new Set(prompts.map((p) => p.category))];
 
   try {
-    const llm = getRecommender();
-    const content = await llm.complete(
+    log.info("Generating recommendations", { analysisId, companyName });
+    const { text: content, provider, model } = await completePreferringGemini(
       "You are an AI visibility / GEO (Generative Engine Optimization) consultant. Write clear, actionable recommendations.",
       `Generate recommendations for improving AI visibility for "${companyName}".
 
@@ -60,10 +55,17 @@ Write a structured markdown report. Be specific to this brand and metrics.`
       update: { content },
     });
 
+    log.info("Recommendations saved", {
+      analysisId,
+      provider,
+      model,
+      chars: content.length,
+    });
     return { ok: true };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Recommendation generation failed";
+    log.warn("Recommendations failed (soft)", { analysisId, error: message });
     return { ok: false, warning: message };
   }
 }

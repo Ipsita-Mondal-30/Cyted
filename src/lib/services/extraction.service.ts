@@ -1,8 +1,13 @@
 import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
-import { getEnabledProviders, requireGemini } from "@/lib/providers/provider-manager";
+import { createLogger } from "@/lib/logger";
+import {
+  completePreferringGemini,
+} from "@/lib/providers/provider-manager";
 import { mapWithConcurrency } from "@/lib/utils/concurrency";
 import { withRetries } from "@/lib/utils/retries";
+
+const log = createLogger("service:extraction");
 
 export type ExtractionPayload = {
   mentionedBrands: string[];
@@ -25,14 +30,6 @@ function extractJson<T>(text: string): T {
   return JSON.parse(candidate.slice(start, end + 1)) as T;
 }
 
-function getExtractor() {
-  try {
-    return requireGemini();
-  } catch {
-    return getEnabledProviders()[0];
-  }
-}
-
 export async function extractFromResponses(
   analysisId: string,
   companyName: string,
@@ -44,17 +41,24 @@ export async function extractFromResponses(
     select: { id: true, rawResponse: true },
   });
 
-  const extractor = getExtractor();
   const maxRetries = getConfig().maxRetries;
   const concurrency = getConfig().concurrentRequests;
+  log.info("Starting extraction", {
+    analysisId,
+    responses: responses.length,
+    concurrency,
+    maxRetries,
+  });
   let done = 0;
   const total = responses.length;
+  let successCount = 0;
+  let failCount = 0;
 
   await mapWithConcurrency(responses, concurrency, async (response) => {
     try {
       const payload = await withRetries(
         async () => {
-          const raw = await extractor.complete(
+          const { text: raw, provider } = await completePreferringGemini(
             "Extract structured brand visibility data from AI assistant answers. Return JSON only.",
             `Company being analyzed: ${companyName}
 Competitors: ${competitors.join(", ") || "none"}
@@ -74,6 +78,7 @@ Return JSON with:
   "sentiment": "Positive" | "Neutral" | "Negative"
 }`
           );
+          log.debug("Extraction LLM ok", { responseId: response.id, provider });
           const parsed = extractJson<ExtractionPayload>(raw);
           return {
             mentionedBrands: parsed.mentionedBrands || [],
@@ -99,11 +104,18 @@ Return JSON with:
           sentiment: payload.sentiment,
         },
       });
+      successCount += 1;
+      log.debug("Extraction ok", {
+        responseId: response.id,
+        brands: payload.mentionedBrands.length,
+        ranking: payload.ranking,
+        sentiment: payload.sentiment,
+      });
     } catch (error) {
-      console.warn(
-        `Extraction failed for response ${response.id}:`,
-        error instanceof Error ? error.message : error
-      );
+      failCount += 1;
+      log.warn(`Extraction failed for response ${response.id}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     done += 1;
@@ -111,4 +123,6 @@ Return JSON with:
       await onProgress(done, total);
     }
   });
+
+  log.info("Extraction finished", { analysisId, successCount, failCount, total });
 }

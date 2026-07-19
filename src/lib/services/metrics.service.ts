@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/db";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("service:metrics");
 
 function brandMatches(name: string, brands: string[]): boolean {
   const target = name.toLowerCase().trim();
@@ -20,6 +23,7 @@ export async function calculateAndStoreMetrics(
   });
 
   const total = extractions.length;
+  log.info("Calculating metrics", { analysisId, companyName, extractions: total });
   if (total === 0) {
     await prisma.metrics.create({
       data: {
@@ -136,6 +140,14 @@ export async function calculateAndStoreMetrics(
       avgRanking: avgRanking != null ? round4(avgRanking) : null,
       competitorShare,
     },
+  });
+
+  log.info("Metrics saved", {
+    analysisId,
+    visibilityScore: round4(visibilityScore * 100),
+    mentionRate: round4(mentionRate * 100),
+    shareOfVoice: round4(shareOfVoice * 100),
+    competitorShare,
   });
 }
 

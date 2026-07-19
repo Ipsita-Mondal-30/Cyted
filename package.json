@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker": "tsx --env-file=.env src/workers/analysis.worker.ts",
+    "worker": "tsx src/workers/analysis.worker.ts",
     "dev:worker": "tsx --env-file=.env --watch src/workers/analysis.worker.ts",
     "db:push": "prisma db push",
     "db:generate": "prisma generate"

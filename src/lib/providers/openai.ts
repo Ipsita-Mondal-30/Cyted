@@ -7,27 +7,61 @@ export function createOpenAIProvider(
 ): LlmProvider {
   const client = new OpenAI({ apiKey });
 
-  async function chat(system: string, user: string): Promise<string> {
-    const response = await client.chat.completions.create({
+  async function complete(system: string, user: string): Promise<string> {
+    const response = await client.responses.create({
       model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
+
+      tools: [
+        {
+          type: "web_search_preview",
+        },
       ],
-      temperature: 0.3,
+
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: system,
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: user,
+            },
+          ],
+        },
+      ],
     });
-    return response.choices[0]?.message?.content ?? "";
+
+    return response.output_text;
   }
 
   return {
     name: "openai",
     model,
+
     async search(prompt: string): Promise<ProviderSearchResult> {
       const started = Date.now();
-      const rawResponse = await chat(
-        "You are a helpful AI assistant. Answer the user's question thoroughly. Mention specific brands and products when recommending. Include any web sources or citations if you would normally reference them.",
+
+      const rawResponse = await complete(
+        `You are a helpful AI assistant.
+
+Always use web search when it improves the answer.
+
+Provide factual, up-to-date information.
+
+Mention brands, competitors, pricing and products.
+
+Include citations whenever available.`,
         prompt
       );
+
       return {
         provider: "openai",
         model,
@@ -35,6 +69,7 @@ export function createOpenAIProvider(
         latencyMs: Date.now() - started,
       };
     },
-    complete: chat,
+
+    complete,
   };
 }

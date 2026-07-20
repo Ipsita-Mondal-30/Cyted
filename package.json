@@ -13,7 +13,7 @@
     "db:generate": "prisma generate"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.112.3",
     "@google/generative-ai": "^0.24.0",
     "@prisma/client": "^6.5.0",
     "@supabase/ssr": "^0.6.1",

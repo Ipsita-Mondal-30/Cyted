@@ -10,23 +10,51 @@ export function createClaudeProvider(
   async function complete(system: string, user: string): Promise<string> {
     const response = await client.messages.create({
       model,
-      max_tokens: 4096,
       system,
-      messages: [{ role: "user", content: user }],
+      max_tokens: 4096,
+
+      messages: [
+        {
+          role: "user",
+          content: user,
+        },
+      ],
+
+      tools: [
+        {
+          type: "web_search_20250305",
+          name: "web_search",
+          max_uses: 5,
+        },
+      ],
     });
-    const textBlock = response.content.find((b) => b.type === "text");
-    return textBlock && textBlock.type === "text" ? textBlock.text : "";
+
+    return response.content
+      .filter((block) => block.type === "text")
+      .map((block: any) => block.text)
+      .join("\n");
   }
 
   return {
     name: "claude",
     model,
+
     async search(prompt: string): Promise<ProviderSearchResult> {
       const started = Date.now();
+
       const rawResponse = await complete(
-        "You are a helpful AI assistant. Answer the user's question thoroughly. Mention specific brands and products when recommending. Include any web sources or citations if you would normally reference them.",
+        `You are a helpful AI assistant.
+
+Always use web search whenever it would improve the answer.
+
+Provide factual, up-to-date information.
+
+Include citations when available.
+
+Mention brands, products and pricing where appropriate.`,
         prompt
       );
+
       return {
         provider: "claude",
         model,
@@ -34,6 +62,7 @@ export function createClaudeProvider(
         latencyMs: Date.now() - started,
       };
     },
+
     complete,
   };
 }

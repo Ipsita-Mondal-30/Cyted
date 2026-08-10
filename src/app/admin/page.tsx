@@ -1,200 +1,12 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
+import { loadAdminUsage } from "@/lib/admin-usage";
+import { formatUsd } from "@/lib/ai-pricing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type ProviderUsage = {
-  provider: string;
-  calls: number;
-  successes: number;
-  failures: number;
-  successRate: number;
-  avgLatencyMs: number | null;
-  totalResponseChars: number;
-  models: Array<{
-    model: string;
-    calls: number;
-    successes: number;
-    failures: number;
-    avgLatencyMs: number | null;
-  }>;
-};
-
-async function loadUsage() {
-  const [
-    userCount,
-    companyCount,
-    analysisCounts,
-    promptCount,
-    responseCount,
-    extractionCount,
-    responses,
-    recentAnalyses,
-  ] = await Promise.all([
-    prisma.user.count(),
-    prisma.company.count(),
-    prisma.analysisJob.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    }),
-    prisma.prompt.count(),
-    prisma.response.count(),
-    prisma.extractedResult.count(),
-    prisma.response.findMany({
-      select: {
-        provider: true,
-        model: true,
-        latencyMs: true,
-        error: true,
-        rawResponse: true,
-      },
-    }),
-    prisma.analysisJob.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 25,
-      select: {
-        id: true,
-        companyName: true,
-        status: true,
-        progress: true,
-        createdAt: true,
-        completedAt: true,
-        user: { select: { email: true, name: true } },
-        _count: { select: { prompts: true, responses: true } },
-      },
-    }),
-  ]);
-
-  const byProvider: Record<
-    string,
-    {
-      provider: string;
-      calls: number;
-      successes: number;
-      failures: number;
-      totalLatencyMs: number;
-      latencySamples: number;
-      totalResponseChars: number;
-      models: Record<
-        string,
-        {
-          calls: number;
-          successes: number;
-          failures: number;
-          totalLatencyMs: number;
-          latencySamples: number;
-        }
-      >;
-    }
-  > = {};
-
-  for (const row of responses) {
-    const provider = row.provider || "unknown";
-    if (!byProvider[provider]) {
-      byProvider[provider] = {
-        provider,
-        calls: 0,
-        successes: 0,
-        failures: 0,
-        totalLatencyMs: 0,
-        latencySamples: 0,
-        totalResponseChars: 0,
-        models: {},
-      };
-    }
-    const agg = byProvider[provider];
-    agg.calls += 1;
-    const failed = Boolean(row.error);
-    if (failed) agg.failures += 1;
-    else agg.successes += 1;
-    if (typeof row.latencyMs === "number") {
-      agg.totalLatencyMs += row.latencyMs;
-      agg.latencySamples += 1;
-    }
-    if (row.rawResponse) agg.totalResponseChars += row.rawResponse.length;
-
-    const model = row.model || "unknown";
-    if (!agg.models[model]) {
-      agg.models[model] = {
-        calls: 0,
-        successes: 0,
-        failures: 0,
-        totalLatencyMs: 0,
-        latencySamples: 0,
-      };
-    }
-    const m = agg.models[model];
-    m.calls += 1;
-    if (failed) m.failures += 1;
-    else m.successes += 1;
-    if (typeof row.latencyMs === "number") {
-      m.totalLatencyMs += row.latencyMs;
-      m.latencySamples += 1;
-    }
-  }
-
-  const providers: ProviderUsage[] = Object.values(byProvider)
-    .map((p) => ({
-      provider: p.provider,
-      calls: p.calls,
-      successes: p.successes,
-      failures: p.failures,
-      successRate:
-        p.calls > 0 ? Math.round((p.successes / p.calls) * 1000) / 10 : 0,
-      avgLatencyMs:
-        p.latencySamples > 0
-          ? Math.round(p.totalLatencyMs / p.latencySamples)
-          : null,
-      totalResponseChars: p.totalResponseChars,
-      models: Object.entries(p.models)
-        .map(([model, m]) => ({
-          model,
-          calls: m.calls,
-          successes: m.successes,
-          failures: m.failures,
-          avgLatencyMs:
-            m.latencySamples > 0
-              ? Math.round(m.totalLatencyMs / m.latencySamples)
-              : null,
-        }))
-        .sort((a, b) => b.calls - a.calls),
-    }))
-    .sort((a, b) => b.calls - a.calls);
-
-  const analysesByStatus = Object.fromEntries(
-    analysisCounts.map((r) => [r.status, r._count._all])
-  );
-
-  return {
-    generatedAt: new Date().toISOString(),
-    totals: {
-      users: userCount,
-      companies: companyCount,
-      analyses: analysisCounts.reduce((s, r) => s + r._count._all, 0),
-      analysesByStatus,
-      prompts: promptCount,
-      providerCalls: responseCount,
-      extractions: extractionCount,
-    },
-    providers,
-    recentAnalyses: recentAnalyses.map((a) => ({
-      id: a.id,
-      companyName: a.companyName,
-      status: a.status,
-      progress: a.progress,
-      createdAt: a.createdAt,
-      completedAt: a.completedAt,
-      userEmail: a.user.email,
-      userName: a.user.name,
-      promptCount: a._count.prompts,
-      responseCount: a._count.responses,
-    })),
-  };
-}
-
 export default async function AdminPage() {
-  const data = await loadUsage();
+  const data = await loadAdminUsage();
   const statusEntries = Object.entries(data.totals.analysesByStatus || {});
 
   return (
@@ -205,10 +17,11 @@ export default async function AdminPage() {
             Admin · no auth
           </p>
           <h1 className="mt-1 text-3xl font-semibold text-stone-900">
-            AI usage
+            AI usage & cost
           </h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Aggregate provider usage across all accounts and analyses.
+          <p className="mt-2 max-w-2xl text-sm text-stone-600">
+            Aggregate provider usage and estimated spend across all accounts and
+            analyses.
           </p>
         </div>
         <div className="text-right text-xs text-stone-500">
@@ -220,13 +33,26 @@ export default async function AdminPage() {
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Users" value={String(data.totals.users)} />
-        <StatCard label="Companies" value={String(data.totals.companies)} />
-        <StatCard label="Analyses" value={String(data.totals.analyses)} />
+        <StatCard
+          label="Est. total cost"
+          value={data.totals.estimatedCostFormatted}
+          emphasize
+        />
         <StatCard
           label="Provider calls"
           value={String(data.totals.providerCalls)}
         />
+        <StatCard
+          label="Est. input tokens"
+          value={formatTokens(data.totals.estimatedInputTokens)}
+        />
+        <StatCard
+          label="Est. output tokens"
+          value={formatTokens(data.totals.estimatedOutputTokens)}
+        />
+        <StatCard label="Users" value={String(data.totals.users)} />
+        <StatCard label="Companies" value={String(data.totals.companies)} />
+        <StatCard label="Analyses" value={String(data.totals.analyses)} />
         <StatCard label="Prompts" value={String(data.totals.prompts)} />
         <StatCard label="Extractions" value={String(data.totals.extractions)} />
         {statusEntries.map(([status, count]) => (
@@ -238,77 +64,125 @@ export default async function AdminPage() {
         ))}
       </section>
 
+      <p className="mt-4 text-xs leading-relaxed text-stone-500">
+        {data.costNote}
+      </p>
+
       <section className="mt-10">
-        <h2 className="text-lg font-semibold text-stone-900">By provider</h2>
+        <h2 className="text-lg font-semibold text-stone-900">
+          Cost by provider
+        </h2>
         {data.providers.length === 0 ? (
           <p className="mt-3 text-sm text-stone-600">No provider calls yet.</p>
         ) : (
           <div className="mt-4 space-y-4">
-            {data.providers.map((p) => (
-              <div
-                key={p.provider}
-                className="rounded-lg border border-stone-200 bg-white p-4"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="text-base font-semibold capitalize text-stone-900">
-                    {p.provider}
-                  </h3>
-                  <p className="text-sm text-stone-500">
-                    {p.calls} calls · {p.successRate}% success
-                    {p.avgLatencyMs != null
-                      ? ` · avg ${p.avgLatencyMs}ms`
-                      : ""}
-                  </p>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-4 text-sm">
-                  <MiniStat label="Successes" value={String(p.successes)} />
-                  <MiniStat label="Failures" value={String(p.failures)} />
-                  <MiniStat
-                    label="Avg latency"
-                    value={p.avgLatencyMs != null ? `${p.avgLatencyMs}ms` : "—"}
-                  />
-                  <MiniStat
-                    label="Response chars"
-                    value={formatChars(p.totalResponseChars)}
-                  />
-                </div>
-                {p.models.length > 0 && (
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full min-w-[480px] text-left text-sm">
-                      <thead className="text-xs uppercase tracking-wide text-stone-500">
-                        <tr>
-                          <th className="py-1 pr-3 font-medium">Model</th>
-                          <th className="py-1 pr-3 font-medium">Calls</th>
-                          <th className="py-1 pr-3 font-medium">OK</th>
-                          <th className="py-1 pr-3 font-medium">Fail</th>
-                          <th className="py-1 font-medium">Avg latency</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {p.models.map((m) => (
-                          <tr
-                            key={m.model}
-                            className="border-t border-stone-100 text-stone-700"
-                          >
-                            <td className="py-1.5 pr-3 font-mono text-xs">
-                              {m.model}
-                            </td>
-                            <td className="py-1.5 pr-3">{m.calls}</td>
-                            <td className="py-1.5 pr-3">{m.successes}</td>
-                            <td className="py-1.5 pr-3">{m.failures}</td>
-                            <td className="py-1.5">
-                              {m.avgLatencyMs != null
-                                ? `${m.avgLatencyMs}ms`
-                                : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+            {data.providers.map((p) => {
+              const share =
+                data.totals.estimatedCostUsd > 0
+                  ? (p.totalCostUsd / data.totals.estimatedCostUsd) * 100
+                  : 0;
+              return (
+                <div
+                  key={p.provider}
+                  className="rounded-lg border border-stone-200 bg-white p-4"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-base font-semibold capitalize text-stone-900">
+                      {p.provider}
+                    </h3>
+                    <p className="text-sm text-stone-600">
+                      <span className="font-semibold text-stone-900">
+                        {formatUsd(p.totalCostUsd)}
+                      </span>
+                      {" · "}
+                      {share.toFixed(1)}% of spend · {p.calls} calls ·{" "}
+                      {p.successRate}% success
+                      {p.avgLatencyMs != null
+                        ? ` · avg ${p.avgLatencyMs}ms`
+                        : ""}
+                    </p>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-100">
+                    <div
+                      className="h-full rounded-full bg-emerald-600"
+                      style={{ width: `${Math.min(100, share)}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5 text-sm">
+                    <MiniStat label="Input cost" value={formatUsd(p.inputCostUsd)} />
+                    <MiniStat
+                      label="Output cost"
+                      value={formatUsd(p.outputCostUsd)}
+                    />
+                    <MiniStat
+                      label="Input tokens"
+                      value={formatTokens(p.inputTokens)}
+                    />
+                    <MiniStat
+                      label="Output tokens"
+                      value={formatTokens(p.outputTokens)}
+                    />
+                    <MiniStat
+                      label="Failures"
+                      value={`${p.failures} / ${p.calls}`}
+                    />
+                  </div>
+
+                  {p.models.length > 0 && (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[720px] text-left text-sm">
+                        <thead className="text-xs uppercase tracking-wide text-stone-500">
+                          <tr>
+                            <th className="py-1 pr-3 font-medium">Model</th>
+                            <th className="py-1 pr-3 font-medium">Calls</th>
+                            <th className="py-1 pr-3 font-medium">OK / Fail</th>
+                            <th className="py-1 pr-3 font-medium">Avg latency</th>
+                            <th className="py-1 pr-3 font-medium">
+                              Rate ($/1M in·out)
+                            </th>
+                            <th className="py-1 pr-3 font-medium">Tokens in·out</th>
+                            <th className="py-1 font-medium">Est. cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {p.models.map((m) => (
+                            <tr
+                              key={m.model}
+                              className="border-t border-stone-100 text-stone-700"
+                            >
+                              <td className="py-1.5 pr-3 font-mono text-xs">
+                                {m.model}
+                              </td>
+                              <td className="py-1.5 pr-3">{m.calls}</td>
+                              <td className="py-1.5 pr-3">
+                                {m.successes} / {m.failures}
+                              </td>
+                              <td className="py-1.5 pr-3">
+                                {m.avgLatencyMs != null
+                                  ? `${m.avgLatencyMs}ms`
+                                  : "—"}
+                              </td>
+                              <td className="py-1.5 pr-3 text-xs text-stone-500">
+                                ${m.rates.inputPer1M} · ${m.rates.outputPer1M}
+                              </td>
+                              <td className="py-1.5 pr-3 text-xs">
+                                {formatTokens(m.inputTokens)} ·{" "}
+                                {formatTokens(m.outputTokens)}
+                              </td>
+                              <td className="py-1.5 font-medium">
+                                {formatUsd(m.totalCostUsd)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -318,7 +192,7 @@ export default async function AdminPage() {
           Recent analyses
         </h2>
         <div className="mt-4 overflow-x-auto rounded-lg border border-stone-200 bg-white">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[800px] text-left text-sm">
             <thead className="border-b border-stone-200 bg-stone-50 text-xs uppercase tracking-wide text-stone-500">
               <tr>
                 <th className="px-3 py-2 font-medium">Company</th>
@@ -326,16 +200,14 @@ export default async function AdminPage() {
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Prompts</th>
                 <th className="px-3 py-2 font-medium">Calls</th>
+                <th className="px-3 py-2 font-medium">Est. cost</th>
                 <th className="px-3 py-2 font-medium">Created</th>
               </tr>
             </thead>
             <tbody>
               {data.recentAnalyses.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-3 py-4 text-stone-500"
-                  >
+                  <td colSpan={7} className="px-3 py-4 text-stone-500">
                     No analyses yet.
                   </td>
                 </tr>
@@ -366,6 +238,9 @@ export default async function AdminPage() {
                     </td>
                     <td className="px-3 py-2">{a.promptCount}</td>
                     <td className="px-3 py-2">{a.responseCount}</td>
+                    <td className="px-3 py-2 font-medium">
+                      {a.estimatedCostFormatted}
+                    </td>
                     <td className="px-3 py-2 text-xs text-stone-500">
                       {new Date(a.createdAt).toLocaleString()}
                     </td>
@@ -386,13 +261,33 @@ export default async function AdminPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+  emphasize,
+}: {
+  label: string;
+  value: string;
+  emphasize?: boolean;
+}) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-4">
+    <div
+      className={`rounded-lg border p-4 ${
+        emphasize
+          ? "border-emerald-200 bg-emerald-50"
+          : "border-stone-200 bg-white"
+      }`}
+    >
       <p className="text-xs font-medium tracking-wide text-stone-500 uppercase">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-semibold text-stone-900">{value}</p>
+      <p
+        className={`mt-2 text-2xl font-semibold ${
+          emphasize ? "text-emerald-900" : "text-stone-900"
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -408,8 +303,8 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatChars(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+function formatTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }

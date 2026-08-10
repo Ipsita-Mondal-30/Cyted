@@ -50,6 +50,9 @@ const PREFIX_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
   { match: /gemini.*flash/i, rates: { inputPer1M: 0.1, outputPer1M: 0.4 } },
   { match: /gemini.*pro/i, rates: { inputPer1M: 1.25, outputPer1M: 5 } },
   { match: /gemini/i, rates: { inputPer1M: 0.3, outputPer1M: 2.5 } },
+  { match: /groq\/compound/i, rates: { inputPer1M: 0.15, outputPer1M: 0.6 } },
+  { match: /llama-3\.3-70b/i, rates: { inputPer1M: 0.59, outputPer1M: 0.79 } },
+  { match: /groq|llama/i, rates: { inputPer1M: 0.15, outputPer1M: 0.6 } },
 ];
 
 const PROVIDER_DEFAULTS: Record<string, ModelRates> = {
@@ -57,6 +60,7 @@ const PROVIDER_DEFAULTS: Record<string, ModelRates> = {
   gemini: { inputPer1M: 0.3, outputPer1M: 2.5 },
   claude: { inputPer1M: 3, outputPer1M: 15 },
   anthropic: { inputPer1M: 3, outputPer1M: 15 },
+  groq: { inputPer1M: 0.15, outputPer1M: 0.6 },
 };
 
 const UNKNOWN_RATES: ModelRates = { inputPer1M: 1, outputPer1M: 3 };

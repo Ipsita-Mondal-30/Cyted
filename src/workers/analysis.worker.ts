@@ -1,6 +1,6 @@
 import { Job, Worker } from "bullmq";
 import { getConfig, redisHostForLogs } from "@/lib/config";
-import { prisma } from "@/lib/db";
+import { prisma, ensurePrismaConnected, prismaWrite } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
 import {
   getEnabledProviders,
@@ -31,10 +31,12 @@ async function updateProgress(
   job?: Job
 ) {
   log.step("progress", progressMessage, { analysisId, progress });
-  await prisma.analysisJob.update({
-    where: { id: analysisId },
-    data: { progress, progressMessage },
-  });
+  await prismaWrite(() =>
+    prisma.analysisJob.update({
+      where: { id: analysisId },
+      data: { progress, progressMessage },
+    })
+  );
   if (job) {
     await job.updateProgress(progress);
   }
@@ -49,6 +51,8 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     attempt: job.attemptsMade + 1,
   });
 
+  await ensurePrismaConnected();
+
   const analysis = await prisma.analysisJob.findUnique({
     where: { id: analysisId },
   });
@@ -58,8 +62,11 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     throw new Error(`Analysis ${analysisId} not found`);
   }
 
-  const seedCompetitors = (analysis.competitors as string[]) || [];
-  const enabledProviders = listEnabledProviderNames();
+  const seedCompetitors = ((analysis.competitors as string[]) || []).slice(
+    0,
+    getConfig().maxCompetitors
+  );
+  const enabledProviders = await listEnabledProviderNames();
   log.info("Loaded analysis", {
     analysisId,
     companyName: analysis.companyName,
@@ -69,10 +76,21 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
   });
   if (!enabledProviders.some((p) => p.startsWith("claude:"))) {
     log.warn(
-      "Claude is NOT enabled for this job — set ANTHROPIC_API_KEY and restart the worker",
+      "Claude is NOT enabled for this job — set ANTHROPIC_API_KEY and enable it in /admin",
       { analysisId }
     );
   }
+
+  // Clean prior attempt data so retries don't duplicate prompts/responses
+  await prisma.$transaction([
+    prisma.extractedResult.deleteMany({
+      where: { response: { analysisId } },
+    }),
+    prisma.response.deleteMany({ where: { analysisId } }),
+    prisma.prompt.deleteMany({ where: { analysisId } }),
+    prisma.metrics.deleteMany({ where: { analysisId } }),
+    prisma.recommendation.deleteMany({ where: { analysisId } }),
+  ]);
 
   try {
     await prisma.analysisJob.update({
@@ -187,7 +205,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     }
     log.debug("Prompt list", prompts.map((p) => ({ category: p.category, prompt: p.prompt })));
 
-    const providers = getEnabledProviders().map((p) => p.name);
+    const providers = (await getEnabledProviders()).map((p) => p.name);
     log.step("3/6-search", "Searching AI providers", {
       analysisId,
       providers,
@@ -319,7 +337,12 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
 
 async function main() {
   const config = getConfig();
-  const providers = listEnabledProviderNames();
+  const providers = await listEnabledProviderNames().catch((err) => {
+    log.warn("Could not list providers at startup", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [] as string[];
+  });
   const redisOpts = getRedisConnectionOptions();
 
   log.info("Starting analysis worker", {
@@ -336,6 +359,7 @@ async function main() {
     hasOpenAI: Boolean(config.openaiApiKey),
     hasGemini: Boolean(config.geminiApiKey),
     hasClaude: Boolean(config.anthropicApiKey),
+    hasGroq: Boolean(config.groqApiKey),
     categories: config.promptCategories,
     promptsPerCategory: config.promptsPerCategory,
     concurrentRequests: config.concurrentRequests,
@@ -347,7 +371,7 @@ async function main() {
 
   if (!config.anthropicApiKey) {
     log.warn(
-      "ANTHROPIC_API_KEY is empty — Claude will not appear in prompt results until you set it and restart this worker"
+      "ANTHROPIC_API_KEY is empty — Claude will not appear until you set it and enable it in /admin"
     );
   }
 
@@ -361,9 +385,11 @@ async function main() {
     ANALYSIS_QUEUE_NAME,
     processAnalysis,
     {
-      // Pass options so BullMQ owns connections (required for stable Upstash TLS)
       connection: redisOpts,
       concurrency: 1,
+      lockDuration: 10 * 60 * 1000,
+      stalledInterval: 60 * 1000,
+      maxStalledCount: 3,
     }
   );
 

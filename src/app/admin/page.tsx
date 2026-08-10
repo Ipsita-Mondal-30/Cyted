@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AdminProviderToggles } from "@/components/AdminProviderToggles";
 import { loadAdminUsage } from "@/lib/admin-usage";
 import { formatUsd } from "@/lib/ai-pricing";
 
@@ -21,7 +22,7 @@ export default async function AdminPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-stone-600">
             Aggregate provider usage and estimated spend across all accounts and
-            analyses.
+            analyses. Toggle answer engines below for future jobs.
           </p>
         </div>
         <div className="text-right text-xs text-stone-500">
@@ -32,7 +33,9 @@ export default async function AdminPage() {
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <AdminProviderToggles />
+
+      <section className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Est. total cost"
           value={data.totals.estimatedCostFormatted}

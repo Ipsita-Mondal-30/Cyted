@@ -28,20 +28,24 @@ const envSchema = z.object({
   OPENAI_API_KEY: optionalKey,
   GEMINI_API_KEY: optionalKey,
   ANTHROPIC_API_KEY: optionalKey,
+  GROQ_API_KEY: optionalKey,
   OPENAI_MODEL: z.string().default("gpt-4o"),
   GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-20250514"),
+  GROQ_MODEL: z.string().default("groq/compound"),
   PROMPTS_PER_CATEGORY: z.coerce.number().int().positive().default(2),
   PROMPT_CATEGORIES: z.string().default("Comparison,Buying,Pricing,Reviews,Features,Alternatives"),
-  /** Global default for parallel LLM calls (search + extract). */
-  CONCURRENT_REQUESTS: z.coerce.number().int().positive().default(8),
+  /** Global default for parallel LLM calls (search + extract). Keep modest on Render/Supabase. */
+  CONCURRENT_REQUESTS: z.coerce.number().int().positive().default(4),
   /** Parallel provider searches (prompt × provider). Defaults to CONCURRENT_REQUESTS. */
   SEARCH_CONCURRENCY: z.coerce.number().int().positive().optional(),
-  /** Parallel extraction calls. Defaults to min(CONCURRENT_REQUESTS, 6). */
+  /** Parallel extraction calls. Defaults to min(CONCURRENT_REQUESTS, 3). */
   EXTRACT_CONCURRENCY: z.coerce.number().int().positive().optional(),
-  /** Concurrent in-flight searches per provider (OpenAI/Gemini/Claude run in parallel). */
-  PER_PROVIDER_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  /** Concurrent in-flight searches per provider (providers still run in parallel). */
+  PER_PROVIDER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
+  /** Max competitors tracked per analysis (user + discovered). */
+  MAX_COMPETITORS: z.coerce.number().int().positive().default(8),
 });
 
 /**
@@ -105,9 +109,11 @@ export type AppConfig = {
   openaiApiKey?: string;
   geminiApiKey?: string;
   anthropicApiKey?: string;
+  groqApiKey?: string;
   openaiModel: string;
   geminiModel: string;
   claudeModel: string;
+  groqModel: string;
   promptsPerCategory: number;
   promptCategories: string[];
   concurrentRequests: number;
@@ -115,6 +121,7 @@ export type AppConfig = {
   extractConcurrency: number;
   perProviderConcurrency: number;
   maxRetries: number;
+  maxCompetitors: number;
 };
 
 let cached: AppConfig | null = null;
@@ -146,17 +153,20 @@ export function getConfig(): AppConfig {
     openaiApiKey: env.OPENAI_API_KEY,
     geminiApiKey: env.GEMINI_API_KEY,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
+    groqApiKey: env.GROQ_API_KEY,
     openaiModel: env.OPENAI_MODEL,
     geminiModel: env.GEMINI_MODEL,
     claudeModel: env.CLAUDE_MODEL,
+    groqModel: env.GROQ_MODEL,
     promptsPerCategory: env.PROMPTS_PER_CATEGORY,
     promptCategories: splitCsv(env.PROMPT_CATEGORIES),
     concurrentRequests: env.CONCURRENT_REQUESTS,
     searchConcurrency: env.SEARCH_CONCURRENCY ?? env.CONCURRENT_REQUESTS,
     extractConcurrency:
-      env.EXTRACT_CONCURRENCY ?? Math.min(env.CONCURRENT_REQUESTS, 6),
+      env.EXTRACT_CONCURRENCY ?? Math.min(env.CONCURRENT_REQUESTS, 3),
     perProviderConcurrency: env.PER_PROVIDER_CONCURRENCY,
     maxRetries: env.MAX_RETRIES,
+    maxCompetitors: env.MAX_COMPETITORS,
   };
 
   if (cached.promptCategories.length === 0) {

@@ -138,3 +138,10 @@ model Recommendation {
 
   analysis AnalysisJob @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 }
+
+/** Singleton row for admin toggles (provider enable/disable, etc.). */
+model SystemConfig {
+  id                String   @id @default("default")
+  enabledProviders  Json     @default("{}")
+  updatedAt         DateTime @updatedAt
+}

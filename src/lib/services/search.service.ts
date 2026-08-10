@@ -1,5 +1,5 @@
 import { getConfig } from "@/lib/config";
-import { prisma } from "@/lib/db";
+import { prisma, prismaWrite } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
 import { getEnabledProviders } from "@/lib/providers/provider-manager";
 import type { LlmProvider } from "@/lib/providers/types";
@@ -11,18 +11,17 @@ type PromptRow = { id: string; prompt: string };
 
 /**
  * Fan out prompt × provider searches in parallel.
- * Each provider runs its own pool (PER_PROVIDER_CONCURRENCY) so OpenAI,
- * Gemini, and Claude all progress at once instead of sharing one global queue.
+ * Each provider runs its own pool so providers progress together without
+ * stampeding the DB (writes go through prismaWrite).
  */
 export async function searchAllProviders(
   analysisId: string,
   prompts: PromptRow[],
   onProgress?: (done: number, total: number) => Promise<void>
 ): Promise<void> {
-  const providers = getEnabledProviders();
+  const providers = await getEnabledProviders();
   const config = getConfig();
   const perProvider = Math.max(1, config.perProviderConcurrency);
-  // Cap each pool so total in-flight ≈ searchConcurrency
   const poolSize = Math.max(
     1,
     Math.min(
@@ -51,16 +50,18 @@ export async function searchAllProviders(
     });
     try {
       const result = await provider.search(prompt.prompt);
-      await prisma.response.create({
-        data: {
-          analysisId,
-          promptId: prompt.id,
-          provider: result.provider,
-          model: result.model,
-          rawResponse: result.rawResponse,
-          latencyMs: result.latencyMs,
-        },
-      });
+      await prismaWrite(() =>
+        prisma.response.create({
+          data: {
+            analysisId,
+            promptId: prompt.id,
+            provider: result.provider,
+            model: result.model,
+            rawResponse: result.rawResponse,
+            latencyMs: result.latencyMs,
+          },
+        })
+      );
       log.info("Provider call ok", {
         analysisId,
         provider: result.provider,
@@ -74,17 +75,28 @@ export async function searchAllProviders(
         provider: provider.name,
         error: message,
       });
-      await prisma.response.create({
-        data: {
+      try {
+        await prismaWrite(() =>
+          prisma.response.create({
+            data: {
+              analysisId,
+              promptId: prompt.id,
+              provider: provider.name,
+              model: provider.model,
+              rawResponse: null,
+              latencyMs: null,
+              error: message,
+            },
+          })
+        );
+      } catch (dbError) {
+        log.error("Failed to persist provider error row", {
           analysisId,
-          promptId: prompt.id,
           provider: provider.name,
-          model: provider.model,
-          rawResponse: null,
-          latencyMs: null,
-          error: message,
-        },
-      });
+          error:
+            dbError instanceof Error ? dbError.message : String(dbError),
+        });
+      }
     }
 
     done += 1;
@@ -93,7 +105,6 @@ export async function searchAllProviders(
     }
   }
 
-  // All providers progress concurrently; each has its own concurrency pool
   await Promise.all(
     providers.map((provider) =>
       mapWithConcurrency(prompts, poolSize, async (prompt) => {

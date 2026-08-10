@@ -21,6 +21,11 @@ const PROVIDERS: Array<{
     label: "Claude",
     src: "https://cdn.simpleicons.org/anthropic/D4A27F",
   },
+  {
+    id: "groq",
+    label: "Groq",
+    src: "https://cdn.simpleicons.org/groq/F55036",
+  },
 ];
 
 export function AiProviderStrip({

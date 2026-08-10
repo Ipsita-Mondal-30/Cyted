@@ -1,4 +1,4 @@
-export type ProviderName = "openai" | "gemini" | "claude";
+export type ProviderName = "openai" | "gemini" | "claude" | "groq";
 
 export type ProviderSearchResult = {
   provider: ProviderName;

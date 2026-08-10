@@ -2,79 +2,95 @@ import { getConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 import { createClaudeProvider } from "./claude";
 import { createGeminiProvider } from "./gemini";
+import { createGroqProvider } from "./groq";
 import { createOpenAIProvider } from "./openai";
 import type { LlmProvider, ProviderName } from "./types";
+import {
+  getProviderFlags,
+  isProviderEnabledInFlags,
+} from "@/lib/services/provider-settings.service";
 
 const log = createLogger("providers");
 
 /**
- * Build the enabled provider list from current config every time.
- * Do not cache across jobs — otherwise adding ANTHROPIC_API_KEY mid-process
- * (or restarting with a new .env) would keep the old openai+gemini-only set.
+ * Build the enabled provider list from current config + admin toggles.
+ * Do not cache across jobs — keys/toggles may change without restart.
  */
-export function getEnabledProviders(): LlmProvider[] {
+export async function getEnabledProviders(): Promise<LlmProvider[]> {
   const config = getConfig();
+  const flags = await getProviderFlags();
   const providers: LlmProvider[] = [];
 
-  if (config.openaiApiKey) {
+  if (config.openaiApiKey && isProviderEnabledInFlags(flags, "openai")) {
     providers.push(createOpenAIProvider(config.openaiApiKey, config.openaiModel));
   }
-  if (config.geminiApiKey) {
+  if (config.geminiApiKey && isProviderEnabledInFlags(flags, "gemini")) {
     providers.push(createGeminiProvider(config.geminiApiKey, config.geminiModel));
   }
-  if (config.anthropicApiKey) {
+  if (config.anthropicApiKey && isProviderEnabledInFlags(flags, "claude")) {
     providers.push(createClaudeProvider(config.anthropicApiKey, config.claudeModel));
+  }
+  if (config.groqApiKey && isProviderEnabledInFlags(flags, "groq")) {
+    providers.push(createGroqProvider(config.groqApiKey, config.groqModel));
   }
 
   if (providers.length === 0) {
     throw new Error(
-      "No LLM providers enabled. Set at least one of OPENAI_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY."
+      "No LLM providers enabled. Set an API key and enable the provider in /admin."
     );
   }
 
   return providers;
 }
 
-export function listEnabledProviderNames(): string[] {
-  return getEnabledProviders().map((p) => `${p.name}:${p.model}`);
+/** Sync-ish listing for logs — uses env keys only if flags load fails. */
+export async function listEnabledProviderNames(): Promise<string[]> {
+  const providers = await getEnabledProviders();
+  return providers.map((p) => `${p.name}:${p.model}`);
 }
 
-export function getProvider(name: ProviderName): LlmProvider {
-  const provider = getEnabledProviders().find((p) => p.name === name);
+export async function getProvider(name: ProviderName): Promise<LlmProvider> {
+  const provider = (await getEnabledProviders()).find((p) => p.name === name);
   if (!provider) {
-    throw new Error(`Provider "${name}" is not enabled (missing API key)`);
+    throw new Error(`Provider "${name}" is not enabled`);
   }
   return provider;
 }
 
-export function getGeminiProvider(): LlmProvider {
+export async function getGeminiProvider(): Promise<LlmProvider> {
   return getProvider("gemini");
 }
 
-/** Prefer Gemini for prompt/context work; fall back to OpenAI/Claude if missing. */
-export function getPromptLlm(): LlmProvider {
-  const providers = getEnabledProviders();
-  const gemini = providers.find((p) => p.name === "gemini");
-  if (gemini) return gemini;
-  const openai = providers.find((p) => p.name === "openai");
-  if (openai) {
-    log.warn("GEMINI_API_KEY missing — using OpenAI for prompt/context generation");
-    return openai;
+/** Prefer Gemini for prompt/context work; fall back to Groq/OpenAI/Claude. */
+export async function getPromptLlm(): Promise<LlmProvider> {
+  const providers = await getEnabledProviders();
+  const order: ProviderName[] = ["gemini", "groq", "openai", "claude"];
+  for (const name of order) {
+    const match = providers.find((p) => p.name === name);
+    if (match) {
+      if (name !== "gemini") {
+        log.warn(`Using ${name} for prompt/context generation`);
+      }
+      return match;
+    }
   }
   return providers[0];
 }
 
 /**
- * Prefer Gemini, but on failure (quota/rate-limit) fall back to another enabled provider.
+ * Prefer Gemini, then Groq, then others — fall back on quota/rate-limit failures.
  */
 export async function completePreferringGemini(
   system: string,
   user: string
 ): Promise<{ text: string; provider: ProviderName; model: string }> {
-  const providers = getEnabledProviders();
+  const providers = await getEnabledProviders();
+  const preference: ProviderName[] = ["gemini", "groq", "openai", "claude"];
   const ordered = [
-    ...providers.filter((p) => p.name === "gemini"),
-    ...providers.filter((p) => p.name !== "gemini"),
+    ...preference
+      .map((name) => providers.find((p) => p.name === name))
+      .filter((p): p is LlmProvider => Boolean(p)),
+    ...providers.filter((p) => !preference.includes(p.name)),
   ];
 
   let lastError: unknown;
@@ -100,6 +116,6 @@ export async function completePreferringGemini(
     : new Error("All LLM providers failed for complete()");
 }
 
-export function requireGemini(): LlmProvider {
+export async function requireGemini(): Promise<LlmProvider> {
   return getPromptLlm();
 }

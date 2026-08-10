@@ -40,40 +40,44 @@ const envSchema = z.object({
 /**
  * BullMQ needs a Redis protocol URL (redis:// or rediss://), not Upstash REST.
  * Prefer REDIS_URL when it looks valid; otherwise build TLS URL from Upstash REST host + token.
+ * Upstash always requires TLS — plain redis:// to *.upstash.io is upgraded to rediss://.
  */
 export function resolveRedisUrl(input: {
   redisUrl?: string;
   upstashRestUrl?: string;
   upstashRestToken?: string;
 }): string {
-  const raw = input.redisUrl?.trim();
+  const raw = input.redisUrl?.trim().replace(/^["']|["']$/g, "");
+
+  let candidate: string | undefined;
+
   if (raw && (raw.startsWith("redis://") || raw.startsWith("rediss://"))) {
-    return raw;
-  }
-
-  // Accidental paste of `redis-cli --tls -u redis://...` — extract the URL
-  if (raw) {
+    candidate = raw;
+  } else if (raw) {
+    // Accidental paste of `redis-cli --tls -u redis://...` — extract the URL
     const match = raw.match(/(rediss?:\/\/\S+)/);
-    if (match?.[1]) {
-      let extracted = match[1];
-      // Upstash requires TLS — upgrade redis:// to rediss:// for *.upstash.io
-      if (
-        extracted.startsWith("redis://") &&
-        extracted.includes("upstash.io")
-      ) {
-        extracted = "rediss://" + extracted.slice("redis://".length);
-      }
-      return extracted;
-    }
+    if (match?.[1]) candidate = match[1];
   }
 
-  if (input.upstashRestUrl && input.upstashRestToken) {
+  if (!candidate && input.upstashRestUrl && input.upstashRestToken) {
     const host = new URL(input.upstashRestUrl).hostname;
     const token = encodeURIComponent(input.upstashRestToken);
-    return `rediss://default:${token}@${host}:6379`;
+    candidate = `rediss://default:${token}@${host}:6379`;
   }
 
-  return "redis://localhost:6379";
+  if (!candidate) {
+    return "redis://localhost:6379";
+  }
+
+  // Force TLS for Upstash — non-TLS redis:// causes ECONNRESET / EPIPE loops
+  if (
+    candidate.startsWith("redis://") &&
+    candidate.includes("upstash.io")
+  ) {
+    candidate = "rediss://" + candidate.slice("redis://".length);
+  }
+
+  return candidate;
 }
 
 /** Safe host for logs (no password/token). */

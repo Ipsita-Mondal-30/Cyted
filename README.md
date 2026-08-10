@@ -40,7 +40,7 @@ Fill in:
 |----------|-----------------|
 | `DATABASE_URL` | Supabase → Database → Connection string (URI), **Transaction pooler** (port 6543). URL-encode special chars in the password (`@` → `%40`). |
 | `DIRECT_URL` | Same credentials with **Session pooler** (port 5432), no `pgbouncer` param — required for `prisma db push`. |
-| `REDIS_URL` | Upstash → Connect → **ioredis / Node** URL (`rediss://…`). Do **not** paste the REST URL or a `redis-cli` command. |
+| `REDIS_URL` | Upstash → Connect → **ioredis** URL. Must be `rediss://` (TLS). Plain `redis://` causes endless ECONNRESET on Render/Vercel. |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional. If `REDIS_URL` is missing, the app builds `rediss://default:TOKEN@host:6379` from these. |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |

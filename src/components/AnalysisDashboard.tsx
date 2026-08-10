@@ -9,6 +9,8 @@ type StatusPayload = {
   error: string | null;
   warnings: unknown;
   companyName: string;
+  dbHost?: string;
+  polledAt?: string;
 };
 
 type ResultsPayload = {
@@ -55,17 +57,37 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [pollCount, setPollCount] = useState(0);
 
   const loadStatus = useCallback(async () => {
-    const res = await fetch(`/api/analysis/status/${jobId}`);
+    const res = await fetch(
+      `/api/analysis/status/${jobId}?t=${Date.now()}`,
+      {
+        cache: "no-store",
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache" },
+      }
+    );
     if (!res.ok) {
-      throw new Error("Failed to load status");
+      const body = await res.json().catch(() => ({}));
+      throw new Error(
+        body.error
+          ? `${body.error}${body.dbHost ? ` (db: ${body.dbHost})` : ""}`
+          : `Failed to load status (${res.status})`
+      );
     }
     return (await res.json()) as StatusPayload;
   }, [jobId]);
 
   const loadResults = useCallback(async () => {
-    const res = await fetch(`/api/analysis/results/${jobId}`);
+    const res = await fetch(
+      `/api/analysis/results/${jobId}?t=${Date.now()}`,
+      {
+        cache: "no-store",
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache" },
+      }
+    );
     if (!res.ok) {
       throw new Error("Failed to load results");
     }
@@ -81,6 +103,7 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
         const s = await loadStatus();
         if (cancelled) return;
         setStatus(s);
+        setPollCount((n) => n + 1);
         setFetchError(null);
 
         if (s.status === "COMPLETED" || s.status === "FAILED") {
@@ -89,7 +112,7 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
           return;
         }
 
-        timer = setTimeout(tick, 2500);
+        timer = setTimeout(tick, 2000);
       } catch (err) {
         if (!cancelled) {
           setFetchError(err instanceof Error ? err.message : "Error");
@@ -106,8 +129,11 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
   }, [loadStatus, loadResults]);
 
   const progress = status?.progress ?? 0;
-  const isDone = status?.status === "COMPLETED";
-  const isFailed = status?.status === "FAILED";
+  const jobStatus = status?.status || "…";
+  const isDone = jobStatus === "COMPLETED";
+  const isFailed = jobStatus === "FAILED";
+  const isQueued = jobStatus === "QUEUED";
+  const isProcessing = jobStatus === "PROCESSING";
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-10">
@@ -117,7 +143,26 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
           {status?.companyName || "Loading…"}
         </h1>
         <p className="mt-1 text-sm text-stone-600">
-          {status?.progressMessage || "Waiting for worker…"} · {status?.status || "…"}
+          {status?.progressMessage || "Waiting for worker…"} ·{" "}
+          <span
+            className={
+              isProcessing
+                ? "font-medium text-emerald-700"
+                : isFailed
+                  ? "font-medium text-red-700"
+                  : isDone
+                    ? "font-medium text-stone-900"
+                    : "font-medium text-amber-700"
+            }
+          >
+            {jobStatus}
+          </span>
+          {status?.polledAt ? (
+            <span className="text-stone-400">
+              {" "}
+              · polled {new Date(status.polledAt).toLocaleTimeString()}
+            </span>
+          ) : null}
         </p>
       </div>
 
@@ -131,16 +176,28 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
             <div className="h-2 overflow-hidden rounded-full bg-stone-200">
               <div
                 className="h-full rounded-full bg-emerald-600 transition-all duration-500"
-                style={{ width: `${progress}%` }}
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
               />
             </div>
           </div>
-          {status?.status === "QUEUED" && (
+
+          {isQueued && pollCount >= 3 && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Job is queued. If this doesn&apos;t start within a few seconds, run{" "}
-              <code className="rounded bg-amber-100 px-1">npm run worker</code> in
-              a second terminal — the dashboard only polls; the worker processes
-              the analysis.
+              Still queued after several polls. The Render worker may be down, or
+              Vercel and Render may be using different{" "}
+              <code className="rounded bg-amber-100 px-1">DATABASE_URL</code>{" "}
+              values
+              {status?.dbHost ? (
+                <>
+                  {" "}
+                  (this app reads from{" "}
+                  <code className="rounded bg-amber-100 px-1">
+                    {status.dbHost}
+                  </code>
+                  )
+                </>
+              ) : null}
+              . Both must point at the same Supabase Postgres.
             </p>
           )}
         </div>
@@ -148,7 +205,7 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
 
       {fetchError && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {fetchError}
+          Status poll error: {fetchError}
         </p>
       )}
 

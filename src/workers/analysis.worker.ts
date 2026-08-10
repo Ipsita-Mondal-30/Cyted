@@ -16,7 +16,7 @@ import { generateAndStoreRecommendations } from "@/lib/services/recommendation.s
 import { searchAllProviders } from "@/lib/services/search.service";
 import {
   ANALYSIS_QUEUE_NAME,
-  createRedisConnection,
+  getRedisConnectionOptions,
 } from "@/queue/queue";
 
 const log = createLogger("worker");
@@ -260,9 +260,18 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
 async function main() {
   const config = getConfig();
   const providers = listEnabledProviderNames();
+  const redisOpts = getRedisConnectionOptions();
 
   log.info("Starting analysis worker", {
     redis: redisHostForLogs(config.redisUrl),
+    tls: Boolean(redisOpts.tls),
+    dbHost: (() => {
+      try {
+        return new URL(config.databaseUrl).hostname;
+      } catch {
+        return "unknown";
+      }
+    })(),
     providers,
     hasOpenAI: Boolean(config.openaiApiKey),
     hasGemini: Boolean(config.geminiApiKey),
@@ -279,11 +288,18 @@ async function main() {
     );
   }
 
+  if (!redisOpts.tls && redisHostForLogs(config.redisUrl).includes("upstash.io")) {
+    log.error(
+      "Upstash REDIS_URL is missing TLS (must be rediss://). Connections will reset with ECONNRESET/EPIPE."
+    );
+  }
+
   const worker = new Worker<AnalysisJobData>(
     ANALYSIS_QUEUE_NAME,
     processAnalysis,
     {
-      connection: createRedisConnection(),
+      // Pass options so BullMQ owns connections (required for stable Upstash TLS)
+      connection: redisOpts,
       concurrency: 1,
     }
   );

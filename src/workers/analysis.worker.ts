@@ -193,7 +193,9 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
       providers,
       promptCount: prompts.length,
       totalCalls: prompts.length * providers.length,
-      concurrency: getConfig().concurrentRequests,
+      searchConcurrency: getConfig().searchConcurrency,
+      perProviderConcurrency: getConfig().perProviderConcurrency,
+      extractConcurrency: getConfig().extractConcurrency,
     });
     await updateProgress(analysisId, 40, "Searching AI providers", job);
     await searchAllProviders(analysisId, prompts, async (done, total) => {
@@ -337,6 +339,9 @@ async function main() {
     categories: config.promptCategories,
     promptsPerCategory: config.promptsPerCategory,
     concurrentRequests: config.concurrentRequests,
+    searchConcurrency: config.searchConcurrency,
+    extractConcurrency: config.extractConcurrency,
+    perProviderConcurrency: config.perProviderConcurrency,
     maxRetries: config.maxRetries,
   });
 

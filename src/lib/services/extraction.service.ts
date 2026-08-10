@@ -42,7 +42,7 @@ export async function extractFromResponses(
   });
 
   const maxRetries = getConfig().maxRetries;
-  const concurrency = getConfig().concurrentRequests;
+  const concurrency = getConfig().extractConcurrency;
   log.info("Starting extraction", {
     analysisId,
     responses: responses.length,

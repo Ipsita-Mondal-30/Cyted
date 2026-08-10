@@ -33,7 +33,14 @@ const envSchema = z.object({
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-20250514"),
   PROMPTS_PER_CATEGORY: z.coerce.number().int().positive().default(2),
   PROMPT_CATEGORIES: z.string().default("Comparison,Buying,Pricing,Reviews,Features,Alternatives"),
-  CONCURRENT_REQUESTS: z.coerce.number().int().positive().default(3),
+  /** Global default for parallel LLM calls (search + extract). */
+  CONCURRENT_REQUESTS: z.coerce.number().int().positive().default(8),
+  /** Parallel provider searches (prompt × provider). Defaults to CONCURRENT_REQUESTS. */
+  SEARCH_CONCURRENCY: z.coerce.number().int().positive().optional(),
+  /** Parallel extraction calls. Defaults to min(CONCURRENT_REQUESTS, 6). */
+  EXTRACT_CONCURRENCY: z.coerce.number().int().positive().optional(),
+  /** Concurrent in-flight searches per provider (OpenAI/Gemini/Claude run in parallel). */
+  PER_PROVIDER_CONCURRENCY: z.coerce.number().int().positive().default(3),
   MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
 });
 
@@ -104,6 +111,9 @@ export type AppConfig = {
   promptsPerCategory: number;
   promptCategories: string[];
   concurrentRequests: number;
+  searchConcurrency: number;
+  extractConcurrency: number;
+  perProviderConcurrency: number;
   maxRetries: number;
 };
 
@@ -142,6 +152,10 @@ export function getConfig(): AppConfig {
     promptsPerCategory: env.PROMPTS_PER_CATEGORY,
     promptCategories: splitCsv(env.PROMPT_CATEGORIES),
     concurrentRequests: env.CONCURRENT_REQUESTS,
+    searchConcurrency: env.SEARCH_CONCURRENCY ?? env.CONCURRENT_REQUESTS,
+    extractConcurrency:
+      env.EXTRACT_CONCURRENCY ?? Math.min(env.CONCURRENT_REQUESTS, 6),
+    perProviderConcurrency: env.PER_PROVIDER_CONCURRENCY,
     maxRetries: env.MAX_RETRIES,
   };
 

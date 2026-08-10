@@ -2,50 +2,59 @@ import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
 import { getEnabledProviders } from "@/lib/providers/provider-manager";
+import type { LlmProvider } from "@/lib/providers/types";
 import { mapWithConcurrency } from "@/lib/utils/concurrency";
 
 const log = createLogger("service:search");
 
 type PromptRow = { id: string; prompt: string };
 
+/**
+ * Fan out prompt × provider searches in parallel.
+ * Each provider runs its own pool (PER_PROVIDER_CONCURRENCY) so OpenAI,
+ * Gemini, and Claude all progress at once instead of sharing one global queue.
+ */
 export async function searchAllProviders(
   analysisId: string,
   prompts: PromptRow[],
   onProgress?: (done: number, total: number) => Promise<void>
 ): Promise<void> {
   const providers = getEnabledProviders();
-  const concurrency = getConfig().concurrentRequests;
-  log.info("Starting provider search", {
+  const config = getConfig();
+  const perProvider = Math.max(1, config.perProviderConcurrency);
+  // Cap each pool so total in-flight ≈ searchConcurrency
+  const poolSize = Math.max(
+    1,
+    Math.min(
+      perProvider,
+      Math.ceil(config.searchConcurrency / Math.max(providers.length, 1))
+    )
+  );
+
+  const total = prompts.length * providers.length;
+  log.info("Starting provider search (parallel)", {
     analysisId,
     prompts: prompts.length,
     providers: providers.map((p) => p.name),
-    concurrency,
+    searchConcurrency: config.searchConcurrency,
+    perProviderPool: poolSize,
+    totalCalls: total,
   });
 
-  type Task = { prompt: PromptRow; providerIndex: number };
-  const tasks: Task[] = [];
-  for (const prompt of prompts) {
-    for (let i = 0; i < providers.length; i++) {
-      tasks.push({ prompt, providerIndex: i });
-    }
-  }
-
   let done = 0;
-  const total = tasks.length;
 
-  await mapWithConcurrency(tasks, concurrency, async (task) => {
-    const provider = providers[task.providerIndex];
+  async function runOne(provider: LlmProvider, prompt: PromptRow) {
     log.debug("Provider call start", {
       analysisId,
       provider: provider.name,
-      promptId: task.prompt.id,
+      promptId: prompt.id,
     });
     try {
-      const result = await provider.search(task.prompt.prompt);
+      const result = await provider.search(prompt.prompt);
       await prisma.response.create({
         data: {
           analysisId,
-          promptId: task.prompt.id,
+          promptId: prompt.id,
           provider: result.provider,
           model: result.model,
           rawResponse: result.rawResponse,
@@ -68,7 +77,7 @@ export async function searchAllProviders(
       await prisma.response.create({
         data: {
           analysisId,
-          promptId: task.prompt.id,
+          promptId: prompt.id,
           provider: provider.name,
           model: provider.model,
           rawResponse: null,
@@ -82,7 +91,16 @@ export async function searchAllProviders(
     if (onProgress) {
       await onProgress(done, total);
     }
-  });
+  }
+
+  // All providers progress concurrently; each has its own concurrency pool
+  await Promise.all(
+    providers.map((provider) =>
+      mapWithConcurrency(prompts, poolSize, async (prompt) => {
+        await runOne(provider, prompt);
+      })
+    )
+  );
 
   log.info("Provider search finished", { analysisId, total });
 }

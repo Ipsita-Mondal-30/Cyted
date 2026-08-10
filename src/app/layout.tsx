@@ -13,7 +13,7 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "Cyted — AI Visibility",
+  title: "Strand — AI Visibility",
   description: "Analyze how AI assistants recommend your brand",
 };
 

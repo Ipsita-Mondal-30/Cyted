@@ -1,4 +1,4 @@
-# Cyted — AI Visibility MVP
+# Strand — AI Visibility MVP
 
 Analyze how often and how positively your brand is recommended across AI assistants (OpenAI, Gemini, Claude).
 

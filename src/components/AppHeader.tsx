@@ -10,7 +10,7 @@ export function AppHeader({ user }: { user: AuthUser | null }) {
             href="/"
             className="text-sm font-semibold tracking-tight text-white"
           >
-            Cyted
+            Strand
           </Link>
           {user && (
             <nav className="flex gap-4 text-sm text-zinc-400">

@@ -87,7 +87,7 @@ export function ReportRankingHero({
               href="/"
               className="inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200"
             >
-              Try Cyted for free
+              Try Strand for free
             </a>
           )}
           <CopyReportLink reportPath={reportPath} />

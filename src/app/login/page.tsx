@@ -18,7 +18,7 @@ export default function LoginPage() {
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-md text-center">
         <p className="text-sm font-medium tracking-wide text-emerald-700 uppercase">
-          Cyted
+          Strand
         </p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-stone-900">
           AI Visibility

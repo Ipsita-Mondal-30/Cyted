@@ -6,6 +6,7 @@ import {
   getEnabledProviders,
   listEnabledProviderNames,
 } from "@/lib/providers/provider-manager";
+import { resolveBrandsAndCompetitors } from "@/lib/services/competitor.service";
 import { extractFromResponses } from "@/lib/services/extraction.service";
 import { calculateAndStoreMetrics } from "@/lib/services/metrics.service";
 import {
@@ -57,12 +58,12 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     throw new Error(`Analysis ${analysisId} not found`);
   }
 
-  const competitors = (analysis.competitors as string[]) || [];
+  const seedCompetitors = (analysis.competitors as string[]) || [];
   const enabledProviders = listEnabledProviderNames();
   log.info("Loaded analysis", {
     analysisId,
     companyName: analysis.companyName,
-    competitors,
+    competitors: seedCompetitors,
     status: analysis.status,
     enabledProviders,
   });
@@ -79,17 +80,64 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
       data: {
         status: "PROCESSING",
         progress: 5,
-        progressMessage: "Creating company context",
+        progressMessage: "Resolving brands & discovering competitors",
         error: null,
       },
     });
     await job.updateProgress(5);
 
+    log.step("0/6-brands", "Correcting names + discovering top competitors…", {
+      analysisId,
+    });
+    let companyName = analysis.companyName;
+    let competitors = seedCompetitors;
+    try {
+      const resolved = await resolveBrandsAndCompetitors({
+        companyName: analysis.companyName,
+        website: analysis.website,
+        description: analysis.description,
+        competitors: seedCompetitors,
+      });
+      companyName = resolved.companyName;
+      competitors = resolved.competitors;
+      await prisma.analysisJob.update({
+        where: { id: analysisId },
+        data: {
+          companyName,
+          competitors,
+        },
+      });
+      // Keep company profile in sync with corrected name when possible
+      await prisma.company
+        .update({
+          where: { id: analysis.companyId },
+          data: {
+            name: companyName,
+            competitors,
+          },
+        })
+        .catch(() => undefined);
+      log.step("0/6-brands", "Brand resolution complete", {
+        analysisId,
+        companyName,
+        competitors,
+        corrections: resolved.corrections,
+        discovered: resolved.discoveredCompetitors,
+      });
+    } catch (err) {
+      log.warn("Brand resolution failed — continuing with user input", {
+        analysisId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    await updateProgress(analysisId, 10, "Creating company context", job);
+
     log.step("1/6-context", "Building company context via Gemini…", {
       analysisId,
     });
     const context = await buildCompanyContext({
-      companyName: analysis.companyName,
+      companyName,
       website: analysis.website,
       description: analysis.description,
       competitors,
@@ -114,7 +162,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     });
     const promptCount = await generateAndStorePrompts(
       analysisId,
-      analysis.companyName,
+      companyName,
       context
     );
     log.step("2/6-prompts", "Prompts stored", { analysisId, promptCount });
@@ -168,7 +216,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     });
     await extractFromResponses(
       analysisId,
-      analysis.companyName,
+      companyName,
       competitors,
       async (done, total) => {
         const pct = 70 + Math.floor((done / Math.max(total, 1)) * 15);
@@ -192,7 +240,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     log.step("5/6-metrics", "Calculating metrics…", { analysisId });
     await calculateAndStoreMetrics(
       analysisId,
-      analysis.companyName,
+      companyName,
       competitors
     );
     const metrics = await prisma.metrics.findUnique({ where: { analysisId } });
@@ -207,7 +255,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     log.step("6/6-recs", "Generating recommendations…", { analysisId });
     const rec = await generateAndStoreRecommendations(
       analysisId,
-      analysis.companyName,
+      companyName,
       competitors
     );
 

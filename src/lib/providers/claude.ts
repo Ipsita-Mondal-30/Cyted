@@ -43,14 +43,11 @@ export function createClaudeProvider(
       const started = Date.now();
 
       const rawResponse = await complete(
-        `You are a helpful AI assistant.
+        `You are a helpful AI assistant with live web search.
 
-Always use web search whenever it would improve the answer.
+Always use web search whenever it would improve the answer. Prefer Reddit, Quora, reviews, forums, news, and official sources.
 
-Provide factual, up-to-date information.
-
-Include citations when available.
-
+Provide factual, up-to-date information. Include citations when available.
 Mention brands, products and pricing where appropriate.`,
         prompt
       );

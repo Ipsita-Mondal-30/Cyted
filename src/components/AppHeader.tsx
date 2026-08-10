@@ -3,18 +3,21 @@ import type { AuthUser } from "@/lib/auth";
 
 export function AppHeader({ user }: { user: AuthUser | null }) {
   return (
-    <header className="border-b border-stone-200 bg-white/80 backdrop-blur">
+    <header className="border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
         <div className="flex items-center gap-6">
-          <Link href="/" className="text-sm font-semibold tracking-tight text-stone-900">
+          <Link
+            href="/"
+            className="text-sm font-semibold tracking-tight text-white"
+          >
             Cyted
           </Link>
           {user && (
-            <nav className="flex gap-4 text-sm text-stone-600">
-              <Link href="/" className="hover:text-stone-900">
+            <nav className="flex gap-4 text-sm text-zinc-400">
+              <Link href="/" className="hover:text-white">
                 New analysis
               </Link>
-              <Link href="/dashboard" className="hover:text-stone-900">
+              <Link href="/dashboard" className="hover:text-white">
                 History
               </Link>
             </nav>
@@ -31,13 +34,13 @@ export function AppHeader({ user }: { user: AuthUser | null }) {
                 referrerPolicy="no-referrer"
               />
             ) : null}
-            <span className="hidden text-sm text-stone-600 sm:inline">
+            <span className="hidden text-sm text-zinc-400 sm:inline">
               {user.name || user.email}
             </span>
             <form action="/auth/signout" method="post">
               <button
                 type="submit"
-                className="text-sm text-stone-500 hover:text-stone-900"
+                className="text-sm text-zinc-500 hover:text-white"
               >
                 Sign out
               </button>

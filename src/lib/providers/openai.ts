@@ -50,15 +50,12 @@ export function createOpenAIProvider(
       const started = Date.now();
 
       const rawResponse = await complete(
-        `You are a helpful AI assistant.
+        `You are a helpful AI assistant with live web search.
 
-Always use web search when it improves the answer.
+Always use web search when answering. Prefer sources from Reddit, Quora, review sites, forums, news, and official docs.
 
-Provide factual, up-to-date information.
-
-Mention brands, competitors, pricing and products.
-
-Include citations whenever available.`,
+Provide factual, up-to-date information. Mention brands, competitors, pricing and products.
+Include citations/URLs whenever available.`,
         prompt
       );
 

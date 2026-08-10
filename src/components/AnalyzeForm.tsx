@@ -101,7 +101,10 @@ export function AnalyzeForm({ company }: { company: CompanyPrefill }) {
 
       <div>
         <label htmlFor="competitors" className="block text-sm font-medium text-stone-700">
-          Competitors <span className="font-normal text-stone-500">(one per line)</span>
+          Competitors{" "}
+          <span className="font-normal text-stone-500">
+            (optional, one per line — we typo-correct names and auto-add top 5 more)
+          </span>
         </label>
         <textarea
           id="competitors"
@@ -111,6 +114,10 @@ export function AnalyzeForm({ company }: { company: CompanyPrefill }) {
           className="mt-1.5 w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-stone-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
           placeholder={"Adidas\nPuma\nNew Balance"}
         />
+        <p className="mt-1.5 text-xs text-stone-500">
+          Brand names are corrected automatically. We also discover five additional
+          competitors and dedupe against your brand and inputs.
+        </p>
       </div>
 
       {error && (

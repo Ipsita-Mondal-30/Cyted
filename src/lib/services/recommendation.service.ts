@@ -4,6 +4,48 @@ import { completePreferringGemini } from "@/lib/providers/provider-manager";
 
 const log = createLogger("service:recommendation");
 
+export type ContentSuggestion = {
+  type: string;
+  title: string;
+  description: string;
+};
+
+export type RecommendationPayload = {
+  markdown: string;
+  contentSuggestions: ContentSuggestion[];
+};
+
+function extractJson<T>(text: string): T {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1) {
+    throw new Error("No JSON object found in recommendation response");
+  }
+  return JSON.parse(candidate.slice(start, end + 1)) as T;
+}
+
+export function parseRecommendationContent(
+  content: string
+): RecommendationPayload {
+  try {
+    const parsed = JSON.parse(content) as Partial<RecommendationPayload>;
+    if (parsed && typeof parsed.markdown === "string") {
+      return {
+        markdown: parsed.markdown,
+        contentSuggestions: Array.isArray(parsed.contentSuggestions)
+          ? parsed.contentSuggestions
+          : [],
+      };
+    }
+  } catch {
+    // legacy plain markdown
+  }
+  return { markdown: content, contentSuggestions: [] };
+}
+
 export async function generateAndStoreRecommendations(
   analysisId: string,
   companyName: string,
@@ -22,9 +64,9 @@ export async function generateAndStoreRecommendations(
 
   try {
     log.info("Generating recommendations", { analysisId, companyName });
-    const { text: content, provider, model } = await completePreferringGemini(
-      "You are an AI visibility / GEO (Generative Engine Optimization) consultant. Write clear, actionable recommendations.",
-      `Generate recommendations for improving AI visibility for "${companyName}".
+    const { text, provider, model } = await completePreferringGemini(
+      "You are an AI visibility / GEO consultant. Return JSON only with markdown report and content suggestions.",
+      `Generate an AI visibility improvement plan for "${companyName}".
 
 Metrics:
 - Visibility Score: ${metrics.visibilityScore}
@@ -33,21 +75,55 @@ Metrics:
 - Citation Rate: ${metrics.citationRate}%
 - Recommendation Rate: ${metrics.recommendationRate}%
 - Average Ranking: ${metrics.avgRanking ?? "N/A"}
-- Competitor Share: ${JSON.stringify(metrics.competitorShare)}
+- Competitor Share: ${JSON.stringify(
+  Object.fromEntries(
+    Object.entries(
+      (metrics.competitorShare as Record<string, number>) || {}
+    ).filter(([k]) => !k.startsWith("__"))
+  )
+)}
 - Competitors: ${competitors.join(", ") || "none"}
-- Prompt categories covered: ${categories.join(", ")}
+- Prompt categories: ${categories.join(", ")}
 
-Include concrete advice on:
-1. Content strategy
-2. SEO / GEO
-3. Schema markup
-4. Comparison pages
-5. FAQ pages
-6. Buying guides
-7. Review / social proof pages
+Return JSON ONLY (no markdown fences) with this shape:
+{
+  "markdown": "# Workpunkt — AI Visibility Report\\n\\nUse proper markdown: # ## ###, **bold**, - bullets, numbered lists, tables if useful. Include Summary snapshot, prioritization timeline, then sections for Content strategy, SEO/GEO, Schema markup, Comparison pages, FAQ pages, Buying guides, Review/social proof. Be specific to these metrics.",
+  "contentSuggestions": [
+    {
+      "type": "Listicle",
+      "title": "Concrete article title",
+      "description": "1-2 sentences on why this boosts AEO/citations"
+    }
+  ]
+}
 
-Write a structured markdown report. Be specific to this brand and metrics.`
+Provide 5-8 contentSuggestions with varied types such as Listicle, Problem Solution, Year Specific, Comparison, How-To, FAQ Hub, Buying Guide, Case Study.`
     );
+
+    let payload: RecommendationPayload;
+    try {
+      const parsed = extractJson<{
+        markdown?: string;
+        contentSuggestions?: ContentSuggestion[];
+      }>(text);
+      payload = {
+        markdown:
+          parsed.markdown ||
+          `# AI Visibility Report for ${companyName}\n\n${text}`,
+        contentSuggestions: Array.isArray(parsed.contentSuggestions)
+          ? parsed.contentSuggestions.filter(
+              (s) => s?.title && s?.description && s?.type
+            )
+          : [],
+      };
+    } catch {
+      payload = {
+        markdown: text,
+        contentSuggestions: [],
+      };
+    }
+
+    const content = JSON.stringify(payload);
 
     await prisma.recommendation.upsert({
       where: { analysisId },
@@ -60,6 +136,7 @@ Write a structured markdown report. Be specific to this brand and metrics.`
       provider,
       model,
       chars: content.length,
+      suggestions: payload.contentSuggestions.length,
     });
     return { ok: true };
   } catch (error) {

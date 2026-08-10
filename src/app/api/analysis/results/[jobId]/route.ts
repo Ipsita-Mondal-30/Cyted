@@ -40,6 +40,30 @@ export async function GET(
       );
     }
 
+    const rawShare =
+      (job.metrics?.competitorShare as Record<string, number> | null) || null;
+    let positiveSentimentRate: number | null = null;
+    let competitorShare: Record<string, number> | null = null;
+    if (rawShare) {
+      const { __positiveSentimentRate, ...rest } = rawShare as Record<
+        string,
+        number
+      > & { __positiveSentimentRate?: number };
+      positiveSentimentRate =
+        typeof __positiveSentimentRate === "number"
+          ? Math.round(__positiveSentimentRate * 10000) / 100
+          : null;
+      competitorShare = rest;
+    }
+
+    const metrics = job.metrics
+      ? {
+          ...job.metrics,
+          competitorShare: competitorShare ?? job.metrics.competitorShare,
+          positiveSentimentRate,
+        }
+      : null;
+
     return NextResponse.json(
       {
         id: job.id,
@@ -54,7 +78,7 @@ export async function GET(
         warnings: job.warnings,
         createdAt: job.createdAt,
         completedAt: job.completedAt,
-        metrics: job.metrics,
+        metrics,
         recommendation: job.recommendation,
         prompts: job.prompts.map((p) => ({
           id: p.id,

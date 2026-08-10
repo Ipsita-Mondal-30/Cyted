@@ -7,10 +7,19 @@ export function createGeminiProvider(
 ): LlmProvider {
   const client = new GoogleGenAI({ apiKey });
 
-  async function generate(system: string, user: string): Promise<string> {
+  async function generate(
+    system: string,
+    user: string,
+    withSearch = false
+  ): Promise<string> {
     const response = await client.models.generateContent({
       model,
       contents: `${system}\n\n${user}`,
+      config: withSearch
+        ? {
+            tools: [{ googleSearch: {} }],
+          }
+        : undefined,
     });
 
     return response.text ?? "";
@@ -24,8 +33,13 @@ export function createGeminiProvider(
       const started = Date.now();
 
       const rawResponse = await generate(
-        "You are a helpful AI assistant. Answer the user's question thoroughly. Mention specific brands and products when recommending. Include any web sources or citations if you would normally reference them.",
-        prompt
+        `You are a helpful AI assistant with live web search.
+
+Always search the web when answering. Prefer sources like official sites, Reddit, Quora, review sites, news, and forums.
+
+Mention specific brands and products when recommending. Include citations/URLs when available.`,
+        prompt,
+        true
       );
 
       return {
@@ -36,6 +50,6 @@ export function createGeminiProvider(
       };
     },
 
-    complete: generate,
+    complete: (system, user) => generate(system, user, false),
   };
 }

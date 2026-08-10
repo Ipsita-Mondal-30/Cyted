@@ -43,6 +43,7 @@ export async function calculateAndStoreMetrics(
   let companyMentions = 0;
   let citationHits = 0;
   let recommendationHits = 0;
+  let positiveMentionHits = 0;
   const rankings: number[] = [];
   const brandCounts: Record<string, number> = { [companyName]: 0 };
   for (const c of competitors) brandCounts[c] = 0;
@@ -78,6 +79,9 @@ export async function calculateAndStoreMetrics(
     }
 
     const sentiment = (row.sentiment || "").toLowerCase();
+    if (companyHit && sentiment === "positive") {
+      positiveMentionHits += 1;
+    }
     const isRecommended =
       companyHit &&
       (sentiment === "positive" || (row.ranking != null && row.ranking <= 3));
@@ -97,6 +101,8 @@ export async function calculateAndStoreMetrics(
     totalBrandMentions > 0 ? brandCounts[companyName] / totalBrandMentions : 0;
 
   const citationRate = companyMentions > 0 ? citationHits / companyMentions : 0;
+  const positiveSentimentRate =
+    companyMentions > 0 ? positiveMentionHits / companyMentions : 0;
   const recommendationRate = total > 0 ? recommendationHits / total : 0;
   const avgRanking =
     rankings.length > 0
@@ -119,6 +125,14 @@ export async function calculateAndStoreMetrics(
       totalBrandMentions > 0 ? count / totalBrandMentions : 0;
   }
 
+  // Stash positive sentiment inside competitorShare under reserved key for UI
+  // (avoid schema migration). UI reads metrics.positiveSentimentRate if present
+  // via results API enrichment.
+  const competitorSharePayload = {
+    ...competitorShare,
+    __positiveSentimentRate: positiveSentimentRate,
+  };
+
   await prisma.metrics.upsert({
     where: { analysisId },
     create: {
@@ -129,7 +143,7 @@ export async function calculateAndStoreMetrics(
       citationRate: round4(citationRate * 100),
       recommendationRate: round4(recommendationRate * 100),
       avgRanking: avgRanking != null ? round4(avgRanking) : null,
-      competitorShare,
+      competitorShare: competitorSharePayload,
     },
     update: {
       visibilityScore: round4(visibilityScore * 100),
@@ -138,7 +152,7 @@ export async function calculateAndStoreMetrics(
       citationRate: round4(citationRate * 100),
       recommendationRate: round4(recommendationRate * 100),
       avgRanking: avgRanking != null ? round4(avgRanking) : null,
-      competitorShare,
+      competitorShare: competitorSharePayload,
     },
   });
 
@@ -147,6 +161,7 @@ export async function calculateAndStoreMetrics(
     visibilityScore: round4(visibilityScore * 100),
     mentionRate: round4(mentionRate * 100),
     shareOfVoice: round4(shareOfVoice * 100),
+    positiveSentimentRate: round4(positiveSentimentRate * 100),
     competitorShare,
   });
 }

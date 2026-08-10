@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AiProviderStrip } from "@/components/AiProviderStrip";
+import { BrandLogo } from "@/components/BrandLogo";
 import { ContentSuggestions } from "@/components/ContentSuggestions";
+import { CopyReportLink } from "@/components/CopyReportLink";
 import {
   InsightMetricCard,
   scoreTone,
   type MetricTone,
 } from "@/components/InsightMetricCard";
 import { MarkdownReport } from "@/components/MarkdownReport";
+import { ReportRankingHero } from "@/components/ReportRankingHero";
 import {
   parseRecommendationContent,
   type ContentSuggestion,
@@ -27,7 +31,11 @@ type StatusPayload = {
 type ResultsPayload = {
   id: string;
   companyName: string;
+  website?: string | null;
   competitors: string[];
+  brandLogos?: Record<string, string>;
+  brandDomains?: Record<string, string>;
+  providers?: string[];
   status: string;
   progress: number;
   progressMessage: string | null;
@@ -65,13 +73,23 @@ type ResultsPayload = {
   }>;
 };
 
-export function AnalysisDashboard({ jobId }: { jobId: string }) {
+export function AnalysisDashboard({
+  jobId,
+  mode = "private",
+}: {
+  jobId: string;
+  mode?: "private" | "public";
+}) {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
 
+  const reportPath = `/report/${jobId}`;
+  const isPublic = mode === "public";
+
   const loadStatus = useCallback(async () => {
+    if (isPublic) return null;
     const res = await fetch(
       `/api/analysis/status/${jobId}?t=${Date.now()}`,
       {
@@ -89,22 +107,22 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
       );
     }
     return (await res.json()) as StatusPayload;
-  }, [jobId]);
+  }, [jobId, isPublic]);
 
   const loadResults = useCallback(async () => {
-    const res = await fetch(
-      `/api/analysis/results/${jobId}?t=${Date.now()}`,
-      {
-        cache: "no-store",
-        credentials: "include",
-        headers: { "Cache-Control": "no-cache" },
-      }
-    );
+    const url = isPublic
+      ? `/api/public/report/${jobId}?t=${Date.now()}`
+      : `/api/analysis/results/${jobId}?t=${Date.now()}`;
+    const res = await fetch(url, {
+      cache: "no-store",
+      credentials: isPublic ? "omit" : "include",
+      headers: { "Cache-Control": "no-cache" },
+    });
     if (!res.ok) {
       throw new Error("Failed to load results");
     }
     return (await res.json()) as ResultsPayload;
-  }, [jobId]);
+  }, [jobId, isPublic]);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,8 +130,25 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
 
     async function tick() {
       try {
+        if (isPublic) {
+          const r = await loadResults();
+          if (!cancelled) {
+            setResults(r);
+            setStatus({
+              status: r.status,
+              progress: r.progress,
+              progressMessage: r.progressMessage,
+              error: r.error,
+              warnings: r.warnings,
+              companyName: r.companyName,
+            });
+            setFetchError(null);
+          }
+          return;
+        }
+
         const s = await loadStatus();
-        if (cancelled) return;
+        if (cancelled || !s) return;
         setStatus(s);
         setPollCount((n) => n + 1);
         setFetchError(null);
@@ -128,7 +163,7 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
       } catch (err) {
         if (!cancelled) {
           setFetchError(err instanceof Error ? err.message : "Error");
-          timer = setTimeout(tick, 4000);
+          if (!isPublic) timer = setTimeout(tick, 4000);
         }
       }
     }
@@ -138,10 +173,10 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [loadStatus, loadResults]);
+  }, [loadStatus, loadResults, isPublic]);
 
   const progress = status?.progress ?? 0;
-  const jobStatus = status?.status || "…";
+  const jobStatus = status?.status || results?.status || "…";
   const isDone = jobStatus === "COMPLETED";
   const isFailed = jobStatus === "FAILED";
   const isQueued = jobStatus === "QUEUED";
@@ -193,51 +228,103 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
     ];
   }, [results?.metrics, brand]);
 
+  const rankingRows = useMemo(() => {
+    const share = results?.metrics?.competitorShare || {};
+    const logos = results?.brandLogos || {};
+    const domains = results?.brandDomains || {};
+    const names = new Set<string>([
+      brand,
+      ...(results?.competitors || []),
+      ...Object.keys(share).filter((k) => !k.startsWith("__")),
+    ]);
+    return [...names].map((name) => ({
+      name,
+      share: share[name] ?? (name === brand ? (results?.metrics?.shareOfVoice || 0) / 100 : 0),
+      isYou: name === brand,
+      logoUrl: logos[name],
+      domain: domains[name],
+      website: name === brand ? results?.website : null,
+    }));
+  }, [results, brand]);
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 text-zinc-100">
+    <div className="min-h-[calc(100vh-4rem)] bg-black text-zinc-100">
       <div className="mx-auto max-w-5xl space-y-10 px-4 py-10">
         <header>
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-            AI Visibility Report
-          </p>
-          <h1 className="mt-2 font-sans text-3xl font-semibold tracking-tight text-white">
-            {brand}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-            {status?.progressMessage ||
-              "Querying answer engines and analyzing the responses."}
-            {" · "}
-            <span
-              className={
-                isProcessing
-                  ? "font-medium text-emerald-400"
-                  : isFailed
-                    ? "font-medium text-red-400"
-                    : isDone
-                      ? "font-medium text-zinc-200"
-                      : "font-medium text-amber-400"
-              }
-            >
-              {jobStatus}
-            </span>
-            {status?.polledAt ? (
-              <span className="text-zinc-600">
-                {" "}
-                · polled {new Date(status.polledAt).toLocaleTimeString()}
-              </span>
-            ) : null}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+                AI Visibility Report
+              </p>
+              <div className="mt-2 flex items-center gap-3">
+                <BrandLogo
+                  name={brand}
+                  website={results?.website}
+                  domain={results?.brandDomains?.[brand]}
+                  logoUrl={results?.brandLogos?.[brand]}
+                  size={36}
+                />
+                <h1 className="font-sans text-3xl font-semibold tracking-tight text-white">
+                  {brand}
+                </h1>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
+                {isPublic
+                  ? "Shared AEO report — no login required."
+                  : status?.progressMessage ||
+                    "Querying answer engines and analyzing the responses."}
+                {!isPublic && (
+                  <>
+                    {" · "}
+                    <span
+                      className={
+                        isProcessing
+                          ? "font-medium text-emerald-400"
+                          : isFailed
+                            ? "font-medium text-red-400"
+                            : isDone
+                              ? "font-medium text-zinc-200"
+                              : "font-medium text-amber-400"
+                      }
+                    >
+                      {jobStatus}
+                    </span>
+                  </>
+                )}
+              </p>
+            </div>
+            {isDone && <CopyReportLink reportPath={reportPath} />}
+          </div>
+
+          {(results?.providers?.length || isDone) && (
+            <AiProviderStrip
+              providers={results?.providers}
+              className="mt-5"
+            />
+          )}
+
           {results?.competitors?.length ? (
-            <p className="mt-3 text-xs text-zinc-500">
-              Tracked competitors:{" "}
-              <span className="text-zinc-400">
-                {results.competitors.join(" · ")}
-              </span>
-            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-zinc-500">Tracked competitors</span>
+              {results.competitors.map((c) => (
+                <span
+                  key={c}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 text-xs text-zinc-300"
+                >
+                  <BrandLogo
+                    name={c}
+                    domain={results.brandDomains?.[c]}
+                    logoUrl={results.brandLogos?.[c]}
+                    size={16}
+                  />
+                  {c}
+                </span>
+              ))}
+            </div>
           ) : null}
         </header>
 
-        {!isDone && !isFailed && (
+        {!isPublic && !isDone && !isFailed && (
           <div className="space-y-3 border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="mb-2 flex justify-between text-sm text-zinc-400">
               <span>Progress</span>
@@ -256,16 +343,6 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
                 <code className="rounded bg-zinc-800 px-1 text-amber-100">
                   DATABASE_URL
                 </code>
-                {status?.dbHost ? (
-                  <>
-                    {" "}
-                    (this app:{" "}
-                    <code className="rounded bg-zinc-800 px-1">
-                      {status.dbHost}
-                    </code>
-                    )
-                  </>
-                ) : null}
                 .
               </p>
             )}
@@ -274,7 +351,8 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
 
         {fetchError && (
           <p className="border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-            Status poll error: {fetchError}
+            {isPublic ? "Could not load report: " : "Status poll error: "}
+            {fetchError}
           </p>
         )}
 
@@ -286,6 +364,16 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
 
         {isDone && results?.metrics && (
           <>
+            <ReportRankingHero
+              companyName={brand}
+              website={results.website}
+              logoUrl={results.brandLogos?.[brand]}
+              brandDomain={results.brandDomains?.[brand]}
+              rows={rankingRows}
+              reportPath={reportPath}
+              showCta={isPublic}
+            />
+
             <section>
               <div className="grid grid-cols-1 border border-zinc-800 sm:grid-cols-2">
                 {insightCards.map((card, i) => (
@@ -331,7 +419,14 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
                   .sort((a, b) => b[1] - a[1])
                   .map(([name, share]) => (
                     <div key={name} className="flex items-center gap-3 text-sm">
-                      <span className="w-40 truncate text-zinc-300">{name}</span>
+                      <BrandLogo
+                        name={name}
+                        domain={results.brandDomains?.[name]}
+                        logoUrl={results.brandLogos?.[name]}
+                        website={name === brand ? results.website : null}
+                        size={24}
+                      />
+                      <span className="w-36 truncate text-zinc-300">{name}</span>
                       <div className="h-1.5 flex-1 rounded-full bg-zinc-800">
                         <div
                           className="h-full rounded-full bg-emerald-500/80"
@@ -365,56 +460,60 @@ export function AnalysisDashboard({ jobId }: { jobId: string }) {
               </p>
             )}
 
-            <section>
-              <h2 className="font-sans text-lg font-semibold text-white">
-                Prompt results
-              </h2>
-              <div className="mt-4 space-y-3">
-                {results.prompts.map((p) => (
-                  <details
-                    key={p.id}
-                    className="border border-zinc-800 bg-zinc-950/50 open:bg-zinc-900/40"
-                  >
-                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-200">
-                      <span className="mr-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-zinc-400">
-                        {p.category}
-                      </span>
-                      {p.prompt}
-                    </summary>
-                    <div className="space-y-4 border-t border-zinc-800 px-4 py-4">
-                      {p.responses.map((r) => (
-                        <div key={r.id} className="text-sm">
-                          <div className="flex flex-wrap items-center gap-2 font-medium text-zinc-200">
-                            <span className="capitalize">{r.provider}</span>
-                            <span className="text-xs font-normal text-zinc-500">
-                              {r.model}
-                              {r.latencyMs != null ? ` · ${r.latencyMs}ms` : ""}
-                            </span>
-                            {r.extracted?.sentiment && (
-                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">
-                                {r.extracted.sentiment}
+            {!isPublic && (
+              <section>
+                <h2 className="font-sans text-lg font-semibold text-white">
+                  Prompt results
+                </h2>
+                <div className="mt-4 space-y-3">
+                  {results.prompts.map((p) => (
+                    <details
+                      key={p.id}
+                      className="border border-zinc-800 bg-zinc-950/50 open:bg-zinc-900/40"
+                    >
+                      <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-200">
+                        <span className="mr-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-zinc-400">
+                          {p.category}
+                        </span>
+                        {p.prompt}
+                      </summary>
+                      <div className="space-y-4 border-t border-zinc-800 px-4 py-4">
+                        {p.responses.map((r) => (
+                          <div key={r.id} className="text-sm">
+                            <div className="flex flex-wrap items-center gap-2 font-medium text-zinc-200">
+                              <span className="capitalize">{r.provider}</span>
+                              <span className="text-xs font-normal text-zinc-500">
+                                {r.model}
+                                {r.latencyMs != null
+                                  ? ` · ${r.latencyMs}ms`
+                                  : ""}
                               </span>
-                            )}
-                            {r.extracted?.ranking != null && (
-                              <span className="text-xs text-zinc-500">
-                                Rank #{r.extracted.ranking}
-                              </span>
+                              {r.extracted?.sentiment && (
+                                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">
+                                  {r.extracted.sentiment}
+                                </span>
+                              )}
+                              {r.extracted?.ranking != null && (
+                                <span className="text-xs text-zinc-500">
+                                  Rank #{r.extracted.ranking}
+                                </span>
+                              )}
+                            </div>
+                            {r.error ? (
+                              <p className="mt-1 text-red-400">{r.error}</p>
+                            ) : (
+                              <p className="mt-1 line-clamp-5 whitespace-pre-wrap text-zinc-400">
+                                {r.rawResponse}
+                              </p>
                             )}
                           </div>
-                          {r.error ? (
-                            <p className="mt-1 text-red-400">{r.error}</p>
-                          ) : (
-                            <p className="mt-1 line-clamp-5 whitespace-pre-wrap text-zinc-400">
-                              {r.rawResponse}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                ))}
-              </div>
-            </section>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>

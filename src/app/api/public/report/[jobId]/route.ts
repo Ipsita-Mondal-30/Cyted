@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
-import { AuthError, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { serializeAnalysisReport } from "@/lib/report-serialize";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/**
+ * Public, unauthenticated report payload for completed analyses.
+ * Used by shareable /report/[jobId] links.
+ */
 export async function GET(
   _request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
   try {
-    const user = await requireUser();
     const { jobId } = await context.params;
 
     const job = await prisma.analysisJob.findFirst({
-      where: { id: jobId, userId: user.id },
+      where: { id: jobId, status: "COMPLETED" },
       include: {
         metrics: true,
         recommendation: true,
@@ -33,7 +35,7 @@ export async function GET(
 
     if (!job) {
       return NextResponse.json(
-        { error: "Not found" },
+        { error: "Report not found" },
         {
           status: 404,
           headers: { "Cache-Control": "no-store" },
@@ -43,16 +45,13 @@ export async function GET(
 
     return NextResponse.json(serializeAnalysisReport(job), {
       headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
       },
     });
   } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    console.error("[results]", error);
+    console.error("[public-report]", error);
     return NextResponse.json(
-      { error: "Failed to fetch results" },
+      { error: "Failed to fetch report" },
       { status: 500 }
     );
   }

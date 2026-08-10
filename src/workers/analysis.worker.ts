@@ -91,6 +91,8 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
     });
     let companyName = analysis.companyName;
     let competitors = seedCompetitors;
+    let brandLogos: Record<string, string> = {};
+    let brandDomains: Record<string, string> = {};
     try {
       const resolved = await resolveBrandsAndCompetitors({
         companyName: analysis.companyName,
@@ -100,6 +102,8 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
       });
       companyName = resolved.companyName;
       competitors = resolved.competitors;
+      brandLogos = resolved.brandLogos;
+      brandDomains = resolved.brandDomains;
       await prisma.analysisJob.update({
         where: { id: analysisId },
         data: {
@@ -142,16 +146,22 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
       description: analysis.description,
       competitors,
     });
+    const contextWithLogos = {
+      ...context,
+      brandLogos,
+      brandDomains,
+    };
     log.step("1/6-context", "Company context ready", {
       analysisId,
       industry: context.industry,
       products: context.products.length,
       keywords: context.keywords.length,
+      logoCount: Object.keys(brandLogos).length,
     });
 
     await prisma.analysisJob.update({
       where: { id: analysisId },
-      data: { companyContext: context },
+      data: { companyContext: contextWithLogos },
     });
 
     await updateProgress(analysisId, 20, "Generating prompts", job);

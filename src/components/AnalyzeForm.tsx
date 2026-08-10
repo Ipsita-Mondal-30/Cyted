@@ -44,6 +44,10 @@ export function AnalyzeForm({ company }: { company: CompanyPrefill }) {
       });
 
       const data = await res.json();
+      if (res.status === 401) {
+        router.push(`/login?next=${encodeURIComponent("/")}`);
+        return;
+      }
       if (!res.ok) {
         throw new Error(data.error || "Failed to start analysis");
       }

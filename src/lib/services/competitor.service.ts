@@ -1,3 +1,4 @@
+import { getConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 import { completePreferringGemini } from "@/lib/providers/provider-manager";
 import { buildLogoMap, hostnameFromUrl } from "@/lib/brand-logo";
@@ -45,9 +46,7 @@ function cleanDomain(domain?: string | null): string | null {
 }
 
 /**
- * Correct typos in company/competitor names and discover up to 5 additional
- * real competitors. Dedupes against the company and user-supplied names.
- * Also resolves likely website domains for logos.
+ * Correct typos, discover up to 5 competitors, hard-cap total list size.
  */
 export async function resolveBrandsAndCompetitors(input: {
   companyName: string;
@@ -55,9 +54,13 @@ export async function resolveBrandsAndCompetitors(input: {
   description?: string | null;
   competitors: string[];
 }): Promise<BrandResolution> {
+  const maxCompetitors = getConfig().maxCompetitors;
+  const seed = input.competitors.slice(0, maxCompetitors);
+
   log.info("Resolving brands + discovering competitors", {
     companyName: input.companyName,
-    seedCompetitors: input.competitors,
+    seedCompetitors: seed,
+    maxCompetitors,
   });
 
   const { text } = await completePreferringGemini(
@@ -66,15 +69,16 @@ export async function resolveBrandsAndCompetitors(input: {
 Website: ${input.website || "N/A"}
 Description: ${input.description || "N/A"}
 User-provided competitors (may contain typos): ${
-      input.competitors.length ? input.competitors.join(", ") : "none"
+      seed.length ? seed.join(", ") : "none"
     }
 
 Tasks:
 1. Correct the company name spelling/casing to the well-known brand (keep meaning).
 2. Provide the company's primary website domain (e.g. "nike.com") if known.
 3. Correct each user-provided competitor name and give each a primary domain.
-4. Discover exactly 5 additional REAL competitors in the same market that are NOT the company and NOT already in the user list (after correction), each with a domain.
-5. Prefer well-known brands / products people compare in AI answers.
+4. Discover up to 5 additional REAL competitors in the same market that are NOT the company and NOT already in the user list (after correction), each with a domain.
+5. Prefer the most important well-known brands people compare in AI answers.
+6. Final competitor list must stay short (max ${maxCompetitors} total).
 
 Return JSON only:
 {
@@ -121,10 +125,7 @@ Return JSON only:
       .filter((x) => x.name);
   };
 
-  const userCompetitors = normalizeList(
-    parsed.userCompetitors,
-    input.competitors
-  );
+  const userCompetitors = normalizeList(parsed.userCompetitors, seed);
   const discovered = normalizeList(parsed.discoveredCompetitors, []).slice(
     0,
     5
@@ -135,6 +136,7 @@ Return JSON only:
   const competitorDomains: Record<string, string> = {};
 
   for (const item of [...userCompetitors, ...discovered]) {
+    if (competitors.length >= maxCompetitors) break;
     const key = normalizeKey(item.name);
     if (!key || seen.has(key)) continue;
     if (
@@ -173,7 +175,9 @@ Return JSON only:
     brandDomains,
     discoveredCompetitors: discovered
       .map((d) => d.name)
-      .filter((d) => competitors.some((c) => normalizeKey(c) === normalizeKey(d))),
+      .filter((d) =>
+        competitors.some((c) => normalizeKey(c) === normalizeKey(d))
+      ),
     corrections: parsed.corrections || [],
   };
 

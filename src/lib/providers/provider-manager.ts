@@ -31,7 +31,13 @@ export async function getEnabledProviders(): Promise<LlmProvider[]> {
     providers.push(createClaudeProvider(config.anthropicApiKey, config.claudeModel));
   }
   if (config.groqApiKey && isProviderEnabledInFlags(flags, "groq")) {
-    providers.push(createGroqProvider(config.groqApiKey, config.groqModel));
+    providers.push(
+      createGroqProvider(
+        config.groqApiKey,
+        config.groqModel,
+        config.groqCompleteModel
+      )
+    );
   }
 
   if (providers.length === 0) {

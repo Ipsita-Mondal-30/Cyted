@@ -33,6 +33,8 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-20250514"),
   GROQ_MODEL: z.string().default("groq/compound"),
+  /** Lighter Groq model for extraction/recs (compound can 413 on large prompts). */
+  GROQ_COMPLETE_MODEL: z.string().default("llama-3.3-70b-versatile"),
   PROMPTS_PER_CATEGORY: z.coerce.number().int().positive().default(2),
   PROMPT_CATEGORIES: z.string().default("Comparison,Buying,Pricing,Reviews,Features,Alternatives"),
   /** Global default for parallel LLM calls (search + extract). Keep modest on Render/Supabase. */
@@ -114,6 +116,7 @@ export type AppConfig = {
   geminiModel: string;
   claudeModel: string;
   groqModel: string;
+  groqCompleteModel: string;
   promptsPerCategory: number;
   promptCategories: string[];
   concurrentRequests: number;
@@ -158,6 +161,7 @@ export function getConfig(): AppConfig {
     geminiModel: env.GEMINI_MODEL,
     claudeModel: env.CLAUDE_MODEL,
     groqModel: env.GROQ_MODEL,
+    groqCompleteModel: env.GROQ_COMPLETE_MODEL,
     promptsPerCategory: env.PROMPTS_PER_CATEGORY,
     promptCategories: splitCsv(env.PROMPT_CATEGORIES),
     concurrentRequests: env.CONCURRENT_REQUESTS,

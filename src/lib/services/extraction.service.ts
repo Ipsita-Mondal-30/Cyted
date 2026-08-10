@@ -65,7 +65,7 @@ Competitors: ${competitors.join(", ") || "none"}
 
 AI assistant response:
 """
-${response.rawResponse}
+${(response.rawResponse || "").slice(0, 12_000)}
 """
 
 Return JSON with:

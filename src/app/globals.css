@@ -12,6 +12,11 @@
   --font-serif: var(--font-source-serif);
 }
 
+html,
+body {
+  min-height: 100%;
+}
+
 body {
   background:
     radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.12), transparent),

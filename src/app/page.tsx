@@ -23,10 +23,10 @@ export default async function HomePage() {
             over time, and take actions to boost your visibility.
           </p>
           <a
-            href="#analyze"
+            href={user ? "#analyze" : "/login"}
             className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200"
           >
-            Try for free
+            {user ? "New analysis" : "Log in to start"}
           </a>
           <BrandLogoCarousel />
         </section>
@@ -40,24 +40,38 @@ export default async function HomePage() {
               Start an analysis
             </h2>
             <p className="mt-2 text-sm text-zinc-400">
-              We query ChatGPT, Gemini, and Claude with live web search, then
-              score how often your brand is mentioned and recommended.
+              We query ChatGPT, Gemini, Claude, and Groq with live web search,
+              then score how often your brand is mentioned and recommended.
             </p>
           </div>
-          <div className="mx-auto max-w-xl [&_label]:text-zinc-300 [&_input]:border-zinc-700 [&_input]:bg-zinc-950 [&_input]:text-white [&_textarea]:border-zinc-700 [&_textarea]:bg-zinc-950 [&_textarea]:text-white [&_p]:text-zinc-500 [&_span]:text-zinc-500">
-            <AnalyzeForm
-              company={
-                company
-                  ? {
-                      name: company.name,
-                      website: company.website,
-                      description: company.description,
-                      competitors: company.competitors,
-                    }
-                  : null
-              }
-            />
-          </div>
+          {user ? (
+            <div className="mx-auto max-w-xl [&_label]:text-zinc-300 [&_input]:border-zinc-700 [&_input]:bg-zinc-950 [&_input]:text-white [&_textarea]:border-zinc-700 [&_textarea]:bg-zinc-950 [&_textarea]:text-white [&_p]:text-zinc-500 [&_span]:text-zinc-500">
+              <AnalyzeForm
+                company={
+                  company
+                    ? {
+                        name: company.name,
+                        website: company.website,
+                        description: company.description,
+                        competitors: company.competitors,
+                      }
+                    : null
+                }
+              />
+            </div>
+          ) : (
+            <div className="mx-auto max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-8 text-center">
+              <p className="text-sm text-zinc-400">
+                Sign in to run analyses and view your history.
+              </p>
+              <a
+                href="/login?next=/"
+                className="mt-5 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200"
+              >
+                Log in with Google
+              </a>
+            </div>
+          )}
         </section>
       </main>
     </div>

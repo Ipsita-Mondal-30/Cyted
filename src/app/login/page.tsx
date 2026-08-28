@@ -1,41 +1,82 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { AppHeader } from "@/components/AppHeader";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(
+    searchParams.get("error") === "auth"
+      ? "Sign-in failed. Please try again."
+      : null
+  );
+
   async function signInWithGoogle() {
+    setLoading(true);
+    setError(null);
     const supabase = createClient();
     const origin = window.location.origin;
-    await supabase.auth.signInWithOAuth({
+    const next = searchParams.get("next") || "/";
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${origin}/auth/callback`,
+        redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
+    if (oauthError) {
+      setError(oauthError.message);
+      setLoading(false);
+    }
   }
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
-      <div className="w-full max-w-md text-center">
-        <p className="text-sm font-medium tracking-wide text-emerald-700 uppercase">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950/80 px-8 py-10 text-center shadow-[0_0_80px_rgba(0,0,0,0.45)]">
+        <p className="text-xs font-medium tracking-[0.16em] text-zinc-500 uppercase">
           Strand
         </p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-stone-900">
-          AI Visibility
+        <h1 className="mt-3 font-sans text-3xl font-semibold tracking-tight text-white">
+          Sign in to analyze visibility
         </h1>
-        <p className="mt-3 text-stone-600">
+        <p className="mt-3 text-sm leading-relaxed text-zinc-400">
           See how often AI assistants recommend your brand — and how to improve.
         </p>
+        {error ? (
+          <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {error}
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={signInWithGoogle}
-          className="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-lg bg-stone-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-stone-800"
+          disabled={loading}
+          className="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-full bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-60"
         >
           <GoogleIcon />
-          Continue with Google
+          {loading ? "Redirecting…" : "Continue with Google"}
         </button>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <div className="flex min-h-screen w-full flex-1 flex-col bg-black text-white">
+      <AppHeader user={null} />
+      <Suspense
+        fallback={
+          <main className="flex flex-1 items-center justify-center text-zinc-500">
+            Loading…
+          </main>
+        }
+      >
+        <LoginForm />
+      </Suspense>
+    </div>
   );
 }
 

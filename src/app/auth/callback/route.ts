@@ -23,23 +23,26 @@ export async function GET(request: Request) {
         null;
 
       if (user.email) {
-        await prisma.user.upsert({
-          where: { id: user.id },
-          create: {
-            id: user.id,
-            email: user.email,
-            name,
-            avatarUrl,
-          },
-          update: {
-            email: user.email,
-            name,
-            avatarUrl,
-          },
-        });
+        await prisma.user
+          .upsert({
+            where: { id: user.id },
+            create: {
+              id: user.id,
+              email: user.email,
+              name,
+              avatarUrl,
+            },
+            update: {
+              email: user.email,
+              name,
+              avatarUrl,
+            },
+          })
+          .catch(() => undefined);
       }
 
-      return NextResponse.redirect(`${origin}${next}`);
+      const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      return NextResponse.redirect(`${origin}${safeNext}`);
     }
   }
 

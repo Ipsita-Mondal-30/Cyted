@@ -8,16 +8,12 @@ export type AuthUser = {
   avatarUrl: string | null;
 };
 
-export async function requireUser(): Promise<AuthUser> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user || !user.email) {
-    throw new AuthError("Unauthorized");
-  }
-
+function profileFromSupabaseUser(user: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown>;
+}): AuthUser | null {
+  if (!user.email) return null;
   const name =
     (user.user_metadata?.full_name as string | undefined) ||
     (user.user_metadata?.name as string | undefined) ||
@@ -26,28 +22,48 @@ export async function requireUser(): Promise<AuthUser> {
     (user.user_metadata?.avatar_url as string | undefined) ||
     (user.user_metadata?.picture as string | undefined) ||
     null;
-
-  await prisma.user.upsert({
-    where: { id: user.id },
-    create: {
-      id: user.id,
-      email: user.email,
-      name,
-      avatarUrl,
-    },
-    update: {
-      email: user.email,
-      name,
-      avatarUrl,
-    },
-  });
-
   return {
     id: user.id,
     email: user.email,
     name,
     avatarUrl,
   };
+}
+
+async function syncUserRow(profile: AuthUser) {
+  try {
+    await prisma.user.upsert({
+      where: { id: profile.id },
+      create: {
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        avatarUrl: profile.avatarUrl,
+      },
+      update: {
+        email: profile.email,
+        name: profile.name,
+        avatarUrl: profile.avatarUrl,
+      },
+    });
+  } catch {
+    // Header/login should still work if Postgres is briefly unavailable.
+  }
+}
+
+export async function requireUser(): Promise<AuthUser> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const profile = user ? profileFromSupabaseUser(user) : null;
+  if (!profile) {
+    throw new AuthError("Unauthorized");
+  }
+
+  await syncUserRow(profile);
+  return profile;
 }
 
 export class AuthError extends Error {
@@ -60,7 +76,14 @@ export class AuthError extends Error {
 
 export async function getOptionalUser(): Promise<AuthUser | null> {
   try {
-    return await requireUser();
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const profile = user ? profileFromSupabaseUser(user) : null;
+    if (!profile) return null;
+    await syncUserRow(profile);
+    return profile;
   } catch {
     return null;
   }

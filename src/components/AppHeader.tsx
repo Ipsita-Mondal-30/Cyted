@@ -12,7 +12,7 @@ export function AppHeader({ user }: { user: AuthUser | null }) {
           >
             Strand
           </Link>
-          {user && (
+          {user ? (
             <nav className="flex gap-4 text-sm text-zinc-400">
               <Link href="/" className="hover:text-white">
                 New analysis
@@ -21,9 +21,9 @@ export function AppHeader({ user }: { user: AuthUser | null }) {
                 History
               </Link>
             </nav>
-          )}
+          ) : null}
         </div>
-        {user && (
+        {user ? (
           <div className="flex items-center gap-3">
             {user.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -46,6 +46,13 @@ export function AppHeader({ user }: { user: AuthUser | null }) {
               </button>
             </form>
           </div>
+        ) : (
+          <Link
+            href="/login"
+            className="rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition hover:bg-zinc-200"
+          >
+            Log in
+          </Link>
         )}
       </div>
     </header>

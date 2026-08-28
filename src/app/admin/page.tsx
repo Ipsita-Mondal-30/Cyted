@@ -11,7 +11,7 @@ export default async function AdminPage() {
   const statusEntries = Object.entries(data.totals.analysesByStatus || {});
 
   return (
-    <main className="mx-auto min-h-full max-w-6xl px-4 py-10">
+    <main className="mx-auto min-h-screen max-w-6xl bg-zinc-50 px-4 py-10">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-medium tracking-wide text-emerald-700 uppercase">

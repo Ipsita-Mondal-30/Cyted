@@ -27,7 +27,7 @@ export default function RootLayout({
       lang="en"
       className={`${dmSans.variable} ${sourceSerif.variable} h-full antialiased`}
     >
-      <body className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)]">
+      <body className="flex min-h-screen flex-col bg-black text-white">
         {children}
       </body>
     </html>

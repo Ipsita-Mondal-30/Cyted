@@ -11,7 +11,7 @@ export default async function HomePage() {
     : null;
 
   return (
-    <div className="min-h-full bg-black text-white">
+    <div className="flex min-h-screen w-full flex-1 flex-col bg-black text-white">
       <AppHeader user={user} />
       <main>
         <section className="px-4 pb-6 pt-16 text-center sm:pt-20">

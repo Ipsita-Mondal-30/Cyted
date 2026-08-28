@@ -13,7 +13,7 @@ export default async function DashboardListPage() {
   });
 
   return (
-    <>
+    <div className="min-h-screen bg-zinc-50 text-stone-900">
       <AppHeader user={user} />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
         <div className="mb-8 flex items-center justify-between">
@@ -59,6 +59,6 @@ export default async function DashboardListPage() {
           </ul>
         )}
       </main>
-    </>
+    </div>
   );
 }

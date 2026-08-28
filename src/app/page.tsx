@@ -14,7 +14,7 @@ export default async function HomePage() {
     <div className="flex min-h-screen w-full flex-1 flex-col bg-black text-white">
       <AppHeader user={user} />
       <main>
-        <section className="px-4 pb-6 pt-16 text-center sm:pt-20">
+        <section className="overflow-hidden px-4 pb-6 pt-16 text-center sm:pt-20">
           <h1 className="mx-auto max-w-3xl font-sans text-4xl font-semibold tracking-tight text-white sm:text-5xl">
             Optimize {company?.name || "your brand"}&apos;s AI Visibility today
           </h1>
@@ -44,34 +44,20 @@ export default async function HomePage() {
               then score how often your brand is mentioned and recommended.
             </p>
           </div>
-          {user ? (
-            <div className="mx-auto max-w-xl [&_label]:text-zinc-300 [&_input]:border-zinc-700 [&_input]:bg-zinc-950 [&_input]:text-white [&_textarea]:border-zinc-700 [&_textarea]:bg-zinc-950 [&_textarea]:text-white [&_p]:text-zinc-500 [&_span]:text-zinc-500">
-              <AnalyzeForm
-                company={
-                  company
-                    ? {
-                        name: company.name,
-                        website: company.website,
-                        description: company.description,
-                        competitors: company.competitors,
-                      }
-                    : null
-                }
-              />
-            </div>
-          ) : (
-            <div className="mx-auto max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-8 text-center">
-              <p className="text-sm text-zinc-400">
-                Sign in to run analyses and view your history.
-              </p>
-              <a
-                href="/login?next=/"
-                className="mt-5 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200"
-              >
-                Log in with Google
-              </a>
-            </div>
-          )}
+          <div className="mx-auto max-w-xl [&_label]:text-zinc-300 [&_input]:border-zinc-700 [&_input]:bg-zinc-950 [&_input]:text-white [&_textarea]:border-zinc-700 [&_textarea]:bg-zinc-950 [&_textarea]:text-white [&_p]:text-zinc-500 [&_span]:text-zinc-500">
+            <AnalyzeForm
+              company={
+                company
+                  ? {
+                      name: company.name,
+                      website: company.website,
+                      description: company.description,
+                      competitors: company.competitors,
+                    }
+                  : null
+              }
+            />
+          </div>
         </section>
       </main>
     </div>

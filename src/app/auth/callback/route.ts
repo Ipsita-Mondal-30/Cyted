@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
 
   if (code) {
     const supabase = await createClient();
@@ -41,8 +41,18 @@ export async function GET(request: Request) {
           .catch(() => undefined);
       }
 
-      const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
-      return NextResponse.redirect(`${origin}${safeNext}`);
+      const cookieStore = await cookies();
+      const nextFromCookie = cookieStore.get("auth_next")?.value;
+      const nextParam = searchParams.get("next");
+      const rawNext = nextFromCookie
+        ? decodeURIComponent(nextFromCookie)
+        : nextParam || "/";
+      const safeNext =
+        rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+
+      const response = NextResponse.redirect(`${origin}${safeNext}`);
+      response.cookies.delete("auth_next");
+      return response;
     }
   }
 

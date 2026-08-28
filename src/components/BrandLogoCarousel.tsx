@@ -80,17 +80,21 @@ function MarqueeRow({
 
 export function BrandLogoCarousel() {
   return (
-    <div className="relative mx-auto mt-14 max-w-4xl px-2">
+    <div className="relative mx-auto mt-10 w-full max-w-4xl overflow-hidden px-0">
       <div
-        className="origin-center scale-[0.95] sm:scale-100"
+        className="overflow-hidden py-10 sm:py-12"
         style={{
           perspective: "900px",
+          maskImage:
+            "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+          WebkitMaskImage:
+            "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
         }}
       >
         <div
-          className="space-y-3 opacity-90"
+          className="origin-center space-y-3 opacity-90"
           style={{
-            transform: "rotateX(42deg) rotateZ(-8deg)",
+            transform: "rotateX(38deg) rotateZ(-6deg) scale(0.88)",
             transformStyle: "preserve-3d",
           }}
         >
@@ -99,9 +103,8 @@ export function BrandLogoCarousel() {
           <MarqueeRow brands={ROWS[2]} duration="40s" />
         </div>
       </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-black to-transparent" />
     </div>
   );
 }

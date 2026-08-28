@@ -27,25 +27,18 @@ function isPublicPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // API routes authenticate in route handlers (requireUser) — skip edge auth
   if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  // Public pages: no Supabase call (avoids slow/hanging getUser on every hit)
-  if (isPublicPath(pathname) && pathname !== "/login") {
+  // Public pages skip edge auth entirely (login page handles its own redirect).
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
   const { supabaseResponse, user } = await updateSession(request);
 
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
-  }
-
-  if (!user && !isPublicPath(pathname)) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
@@ -57,9 +50,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Run on page routes only — not /api (handlers auth themselves) or static assets.
-     */
     "/((?!api/|_next/static|_next/image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

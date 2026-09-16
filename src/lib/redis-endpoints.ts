@@ -3,20 +3,28 @@ import { resolveRedisUrl, redisHostForLogs } from "@/lib/redis-url";
 
 const log = createLogger("redis-endpoints");
 
-/** Primary Upstash (used before env credentials). */
-const PRIMARY_UPSTASH = {
-  restUrl: "https://clever-shrimp-280777.upstash.io",
-  token: "gQAAAAAABEjJAAIgcDExOGE1NjE5YzU1MTg0NzExODM1MGFiNWNhMTNmYjJiYw",
-} as const;
+/** Built-in Upstash instances (tried in order, before env credentials). */
+const BUILTIN_UPSTASH_ENDPOINTS = [
+  {
+    restUrl: "https://clever-shrimp-280777.upstash.io",
+    token: "gQAAAAAABEjJAAIgcDExOGE1NjE5YzU1MTg0NzExODM1MGFiNWNhMTNmYjJiYw",
+  },
+  {
+    restUrl: "https://informed-dinosaur-280319.upstash.io",
+    token: "gQAAAAAABEb_AAIgcDIzZGQyOTY5MThmNDA0OTllOGMyYmY0ZDRhMmI4Mzk3NA",
+  },
+] as const;
 
 let cachedCandidates: string[] | null = null;
 let activeIndex = 0;
 
-function primaryRedisUrl(): string {
-  return resolveRedisUrl({
-    upstashRestUrl: PRIMARY_UPSTASH.restUrl,
-    upstashRestToken: PRIMARY_UPSTASH.token,
-  });
+function builtinRedisUrls(): string[] {
+  return BUILTIN_UPSTASH_ENDPOINTS.map((ep) =>
+    resolveRedisUrl({
+      upstashRestUrl: ep.restUrl,
+      upstashRestToken: ep.token,
+    })
+  );
 }
 
 function envRedisUrl(): string | undefined {
@@ -56,11 +64,11 @@ function dedupeByHost(urls: string[]): string[] {
   return out;
 }
 
-/** Ordered Redis URLs: hardcoded primary first, then env. */
+/** Ordered Redis URLs: built-in endpoints first, then env. */
 export function getRedisUrlCandidates(): string[] {
   if (cachedCandidates) return cachedCandidates;
 
-  const list: string[] = [primaryRedisUrl()];
+  const list: string[] = [...builtinRedisUrls()];
   const fromEnv = envRedisUrl();
   if (fromEnv) list.push(fromEnv);
 
@@ -73,7 +81,7 @@ export function getRedisUrlCandidates(): string[] {
 
 export function getActiveRedisUrl(): string {
   const candidates = getRedisUrlCandidates();
-  return candidates[activeIndex] ?? candidates[0] ?? primaryRedisUrl();
+  return candidates[activeIndex] ?? candidates[0] ?? builtinRedisUrls()[0];
 }
 
 export function isRedisQuotaError(err: unknown): boolean {

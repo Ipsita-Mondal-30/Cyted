@@ -1,6 +1,11 @@
 import { Queue } from "bullmq";
 import IORedis, { type RedisOptions } from "ioredis";
 import { getConfig, redisHostForLogs, resolveRedisUrl } from "@/lib/config";
+import {
+  getActiveRedisUrl,
+  isRedisQuotaError,
+  withRedisFailover,
+} from "@/lib/redis-endpoints";
 import { createLogger } from "@/lib/logger";
 
 export const ANALYSIS_QUEUE_NAME = "analysis";
@@ -12,7 +17,7 @@ const log = createLogger("queue");
  * Upstash requires TLS (`rediss://`) — plain `redis://` causes ECONNRESET loops.
  */
 export function getRedisConnectionOptions(): RedisOptions {
-  const url = getConfig().redisUrl;
+  const url = getActiveRedisUrl();
   const parsed = new URL(url);
   const isUpstash = parsed.hostname.includes("upstash.io");
   const useTls = parsed.protocol === "rediss:" || isUpstash;
@@ -43,6 +48,9 @@ export function getRedisConnectionOptions(): RedisOptions {
     },
     reconnectOnError(err) {
       const msg = err.message || "";
+      if (isRedisQuotaError(err)) {
+        return false;
+      }
       // Reconnect on common Upstash / proxy drops
       if (
         msg.includes("ECONNRESET") ||
@@ -89,6 +97,17 @@ export function createRedisConnection(): IORedis {
 
 let analysisQueue: Queue | null = null;
 
+function resetAnalysisQueueSingleton() {
+  if (!analysisQueue) return;
+  const stale = analysisQueue;
+  analysisQueue = null;
+  void stale.close().catch((err) => {
+    log.warn("Failed to close queue during Redis failover", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 export function getAnalysisQueue(): Queue {
   if (!analysisQueue) {
     // Pass options (not a shared client) so BullMQ can open its own connections
@@ -102,7 +121,7 @@ export function getAnalysisQueue(): Queue {
       },
     });
     log.info("Analysis queue initialized", {
-      host: redisHostForLogs(getConfig().redisUrl),
+      host: redisHostForLogs(getActiveRedisUrl()),
     });
   }
   return analysisQueue;
@@ -124,39 +143,51 @@ export async function enqueueAnalysis(analysisId: string) {
 }
 
 async function enqueueWithSingleton(analysisId: string) {
-  const queue = getAnalysisQueue();
-  return addJob(queue, analysisId);
+  return withRedisFailover(async () => {
+    const queue = getAnalysisQueue();
+    try {
+      return await addJob(queue, analysisId);
+    } catch (err) {
+      if (isRedisQuotaError(err)) {
+        resetAnalysisQueueSingleton();
+      }
+      throw err;
+    }
+  });
 }
 
 async function enqueueEphemeral(analysisId: string) {
-  log.info("Enqueueing via ephemeral Upstash connection (serverless)", {
-    analysisId,
-  });
-  const queue = new Queue(ANALYSIS_QUEUE_NAME, {
-    connection: getRedisConnectionOptions(),
-    defaultJobOptions: {
-      attempts: getConfig().maxRetries + 1,
-      backoff: { type: "exponential", delay: 2000 },
-      removeOnComplete: 100,
-      removeOnFail: 200,
-    },
-  });
-
-  try {
-    return await addJob(queue, analysisId);
-  } finally {
-    await queue.close().catch((err) => {
-      log.warn("Failed to close ephemeral queue", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+  return withRedisFailover(async () => {
+    log.info("Enqueueing via ephemeral Upstash connection (serverless)", {
+      analysisId,
+      host: redisHostForLogs(getActiveRedisUrl()),
     });
-  }
+    const queue = new Queue(ANALYSIS_QUEUE_NAME, {
+      connection: getRedisConnectionOptions(),
+      defaultJobOptions: {
+        attempts: getConfig().maxRetries + 1,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+      },
+    });
+
+    try {
+      return await addJob(queue, analysisId);
+    } finally {
+      await queue.close().catch((err) => {
+        log.warn("Failed to close ephemeral queue", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  });
 }
 
 async function addJob(queue: Queue, analysisId: string) {
   log.info("Enqueueing analysis job", {
     analysisId,
-    host: redisHostForLogs(getConfig().redisUrl),
+    host: redisHostForLogs(getActiveRedisUrl()),
   });
 
   const existing = await queue.getJob(analysisId);

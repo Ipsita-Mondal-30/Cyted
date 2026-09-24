@@ -5,6 +5,10 @@ const log = createLogger("redis-endpoints");
 
 /** Built-in Upstash instances (tried in order, before env credentials). */
 const BUILTIN_UPSTASH_ENDPOINTS = [
+    {
+    restUrl: "https://generous-hookworm-294940.upstash.io",
+    token: "gQAAAAAABIAcAAIgcDE1NGZjMmUzYmZiNDU0Yzc4YTVjZDJjYjQxYTdkOWVjNQ",
+  },
   {
     restUrl: "https://clever-shrimp-280777.upstash.io",
     token: "gQAAAAAABEjJAAIgcDExOGE1NjE5YzU1MTg0NzExODM1MGFiNWNhMTNmYjJiYw",
@@ -13,6 +17,7 @@ const BUILTIN_UPSTASH_ENDPOINTS = [
     restUrl: "https://informed-dinosaur-280319.upstash.io",
     token: "gQAAAAAABEb_AAIgcDIzZGQyOTY5MThmNDA0OTllOGMyYmY0ZDRhMmI4Mzk3NA",
   },
+
 ] as const;
 
 let cachedCandidates: string[] | null = null;

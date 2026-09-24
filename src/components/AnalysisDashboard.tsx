@@ -84,6 +84,7 @@ export function AnalysisDashboard({
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const reportPath = `/report/${jobId}`;
   const isPublic = mode === "public";
@@ -124,6 +125,13 @@ export function AnalysisDashboard({
     return (await res.json()) as ResultsPayload;
   }, [jobId, isPublic]);
 
+  const handleRetry = useCallback(() => {
+    setIsRetrying(true);
+    setPollCount(0);
+    setFetchError(null);
+    // The useEffect will automatically restart polling
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -152,6 +160,7 @@ export function AnalysisDashboard({
         setStatus(s);
         setPollCount((n) => n + 1);
         setFetchError(null);
+        setIsRetrying(false);
 
         if (s.status === "COMPLETED" || s.status === "FAILED") {
           const r = await loadResults();
@@ -173,7 +182,7 @@ export function AnalysisDashboard({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [loadStatus, loadResults, isPublic]);
+  }, [loadStatus, loadResults, isPublic, isRetrying]);
 
   const progress = status?.progress ?? 0;
   const jobStatus = status?.status || results?.status || "…";
@@ -336,15 +345,19 @@ export function AnalysisDashboard({
                 style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
               />
             </div>
-            {isQueued && pollCount >= 3 && (
-              <p className="mt-3 text-sm text-amber-200/90">
-                Still queued after several polls. Confirm the Render worker is
-                running and that Vercel/Render share the same{" "}
-                <code className="rounded bg-zinc-800 px-1 text-amber-100">
-                  DATABASE_URL
-                </code>
-                .
-              </p>
+            {isQueued && pollCount >= 10 && (
+              <div className="mt-3 space-y-2 rounded border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="text-sm text-amber-200/90">
+                  Analysis is taking longer than expected. The worker may be processing other jobs or starting up.
+                </p>
+                <button
+                  onClick={handleRetry}
+                  disabled={isRetrying}
+                  className="rounded bg-amber-500/20 px-3 py-1.5 text-sm font-medium text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+                >
+                  {isRetrying ? "Checking..." : "Check Status Again"}
+                </button>
+              </div>
             )}
           </div>
         )}

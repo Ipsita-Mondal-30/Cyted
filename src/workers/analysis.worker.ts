@@ -386,7 +386,7 @@ async function main() {
     processAnalysis,
     {
       connection: redisOpts,
-      concurrency: 1,
+      concurrency: 2,
       lockDuration: 10 * 60 * 1000,
       stalledInterval: 60 * 1000,
       maxStalledCount: 3,

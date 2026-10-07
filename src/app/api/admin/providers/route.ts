@@ -3,8 +3,11 @@ import { getConfig } from "@/lib/config";
 import type { ProviderName } from "@/lib/providers/types";
 import {
   DEFAULT_PROVIDER_FLAGS,
+  getJobRunMode,
   getProviderFlags,
+  setJobRunMode,
   setProviderFlags,
+  type JobRunMode,
   type ProviderFlags,
 } from "@/lib/services/provider-settings.service";
 
@@ -41,8 +44,12 @@ function modelFor(name: ProviderName): string {
 }
 
 export async function GET() {
-  const flags = await getProviderFlags();
+  const [flags, jobRunMode] = await Promise.all([
+    getProviderFlags(),
+    getJobRunMode(),
+  ]);
   return NextResponse.json({
+    jobRunMode,
     providers: ALL.map((name) => ({
       name,
       label:
@@ -64,7 +71,19 @@ export async function GET() {
 export async function PUT(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     enabledProviders?: Partial<ProviderFlags>;
+    jobRunMode?: JobRunMode;
   };
+
+  if (body.jobRunMode !== undefined) {
+    if (body.jobRunMode !== "direct" && body.jobRunMode !== "queue") {
+      return NextResponse.json(
+        { error: 'jobRunMode must be "direct" or "queue"' },
+        { status: 400 }
+      );
+    }
+    const jobRunMode = await setJobRunMode(body.jobRunMode);
+    return NextResponse.json({ ok: true, jobRunMode });
+  }
 
   const patch: Partial<ProviderFlags> = {};
   for (const name of ALL) {

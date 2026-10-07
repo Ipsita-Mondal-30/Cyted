@@ -16,6 +16,10 @@ import {
 import { generateAndStoreRecommendations } from "@/lib/services/recommendation.service";
 import { searchAllProviders } from "@/lib/services/search.service";
 import {
+  readJobRunMode,
+  type JobRunMode,
+} from "@/lib/services/provider-settings.service";
+import {
   ANALYSIS_QUEUE_NAME,
   getRedisConnectionOptions,
 } from "@/queue/queue";
@@ -42,13 +46,17 @@ async function updateProgress(
   }
 }
 
-async function processAnalysis(job: Job<AnalysisJobData>) {
-  const { analysisId } = job.data;
+/** Shared by both runners; `job` is only present in queue (BullMQ) mode. */
+async function processAnalysis(
+  analysisId: string,
+  job?: Job<AnalysisJobData>,
+  attempt = 1
+) {
   const startedAt = Date.now();
   log.info("Picked up job", {
     analysisId,
-    bullJobId: job.id,
-    attempt: job.attemptsMade + 1,
+    bullJobId: job?.id,
+    attempt: job ? job.attemptsMade + 1 : attempt,
   });
 
   await ensurePrismaConnected();
@@ -102,7 +110,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
         error: null,
       },
     });
-    await job.updateProgress(5);
+    await job?.updateProgress(5);
 
     log.step("0/6-brands", "Correcting names + discovering top competitors…", {
       analysisId,
@@ -307,7 +315,7 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
         warnings,
       },
     });
-    await job.updateProgress(100);
+    await job?.updateProgress(100);
 
     log.info("Analysis completed", {
       analysisId,
@@ -332,6 +340,225 @@ async function processAnalysis(job: Job<AnalysisJobData>) {
       },
     });
     throw error;
+  }
+}
+
+const CONCURRENCY = 2;
+const POLL_INTERVAL_MS = 5_000;
+const HEARTBEAT_MS = 60_000;
+/** No heartbeat for this long → the runner died mid-job (crash / redeploy). */
+const STALE_AFTER_MS = 5 * 60_000;
+/** Direct mode ignores QUEUED rows older than this (e.g. stranded by a Redis outage). */
+const MAX_QUEUED_AGE_MS = 24 * 60 * 60_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ── Queue mode (BullMQ / Redis) ─────────────────────────────────────────────
+// Only constructed while mode = "queue": an idle BullMQ worker polls Redis
+// constantly, which is what burns the Upstash request quota.
+
+/** Skip jobs the direct runner already handled (mode switched while queued). */
+async function processQueuedJob(job: Job<AnalysisJobData>) {
+  const { analysisId } = job.data;
+  const row = await prisma.analysisJob.findUnique({
+    where: { id: analysisId },
+    select: { status: true },
+  });
+  const firstStart = job.attemptsStarted <= 1;
+  if (
+    row?.status === "COMPLETED" ||
+    (firstStart && row && row.status !== "QUEUED")
+  ) {
+    log.warn("Skipping BullMQ job — already handled by the direct runner", {
+      analysisId,
+      status: row.status,
+    });
+    return;
+  }
+  await processAnalysis(analysisId, job);
+}
+
+function startQueueWorker(): Worker<AnalysisJobData> {
+  const worker = new Worker<AnalysisJobData>(
+    ANALYSIS_QUEUE_NAME,
+    processQueuedJob,
+    {
+      connection: getRedisConnectionOptions(),
+      concurrency: CONCURRENCY,
+      lockDuration: 10 * 60 * 1000,
+      stalledInterval: 60 * 1000,
+      maxStalledCount: 3,
+    }
+  );
+
+  worker.on("ready", () => {
+    log.info("Worker ready — listening on queue", {
+      queue: ANALYSIS_QUEUE_NAME,
+    });
+  });
+  worker.on("active", (job) => {
+    log.info("Job became active", {
+      analysisId: job.data.analysisId,
+      bullJobId: job.id,
+    });
+  });
+  worker.on("completed", (job) => {
+    log.info("BullMQ marked job completed", {
+      analysisId: job.data.analysisId,
+    });
+  });
+  worker.on("failed", (job, err) => {
+    log.error("BullMQ marked job failed", {
+      analysisId: job?.data.analysisId,
+      error: err.message,
+    });
+  });
+  worker.on("error", (err) => {
+    log.error("Worker error", err.message);
+  });
+
+  return worker;
+}
+
+// ── Direct mode (Postgres) ──────────────────────────────────────────────────
+
+const running = new Set<string>();
+
+/** Claim the oldest QUEUED row; the conditional update is safe across worker instances. */
+async function claimNextJob(): Promise<string | null> {
+  const next = await prisma.analysisJob.findFirst({
+    where: {
+      status: "QUEUED",
+      id: { notIn: [...running] },
+      createdAt: { gte: new Date(Date.now() - MAX_QUEUED_AGE_MS) },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (!next) return null;
+
+  const { count } = await prisma.analysisJob.updateMany({
+    where: { id: next.id, status: "QUEUED" },
+    data: {
+      status: "PROCESSING",
+      progressMessage: "Picked up by worker",
+      heartbeatAt: new Date(),
+    },
+  });
+  return count === 1 ? next.id : null;
+}
+
+// ponytail: a job that crashes the whole process gets re-queued forever; add an attempts column if that ever happens.
+async function requeueStaleJobs() {
+  const { count } = await prisma.analysisJob.updateMany({
+    where: {
+      status: "PROCESSING",
+      heartbeatAt: { lt: new Date(Date.now() - STALE_AFTER_MS) },
+    },
+    data: {
+      status: "QUEUED",
+      progressMessage: "Re-queued — worker restarted mid-analysis",
+    },
+  });
+  if (count > 0) log.warn("Re-queued stale analyses", { count });
+}
+
+/** Same retry budget + exponential backoff as the BullMQ queue. */
+async function runDirectJob(analysisId: string) {
+  running.add(analysisId);
+  const heartbeat = setInterval(() => {
+    prisma.analysisJob
+      .update({ where: { id: analysisId }, data: { heartbeatAt: new Date() } })
+      .catch((err) =>
+        log.warn("Heartbeat failed", {
+          analysisId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+  }, HEARTBEAT_MS);
+
+  const attempts = getConfig().maxRetries + 1;
+  try {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        await processAnalysis(analysisId, undefined, attempt);
+        return;
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        if (attempt === attempts) {
+          log.error("Direct job failed after all attempts", {
+            analysisId,
+            attempts,
+            error,
+          });
+          return;
+        }
+        const delayMs = 2000 * 2 ** (attempt - 1);
+        log.warn("Direct job failed — retrying", { analysisId, attempt, delayMs, error });
+        await sleep(delayMs);
+      }
+    }
+  } finally {
+    clearInterval(heartbeat);
+    running.delete(analysisId);
+  }
+}
+
+// ── Mode switching (read from SystemConfig, set in /admin) ──────────────────
+
+let currentMode: JobRunMode | null = null;
+let queueWorker: Worker<AnalysisJobData> | null = null;
+
+async function tick() {
+  let mode: JobRunMode;
+  try {
+    mode = await readJobRunMode();
+  } catch (err) {
+    // Keep the current mode on a DB blip rather than flipping runners.
+    log.warn("Could not read job run mode — keeping current", {
+      mode: currentMode,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  if (mode !== currentMode) {
+    log.info("Job run mode", { from: currentMode, to: mode });
+    currentMode = mode;
+  }
+
+  if (mode === "queue") {
+    queueWorker ??= startQueueWorker();
+    return;
+  }
+
+  if (queueWorker) {
+    // Stops Redis polling now; in-flight BullMQ jobs finish in the background.
+    const stopping = queueWorker;
+    queueWorker = null;
+    void stopping.close().catch((err) =>
+      log.warn("Failed to close BullMQ worker", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+  }
+
+  await requeueStaleJobs();
+  while (running.size < CONCURRENCY) {
+    const analysisId = await claimNextJob();
+    if (!analysisId) break;
+    void runDirectJob(analysisId);
+  }
+}
+
+async function pollLoop() {
+  for (;;) {
+    await tick().catch((err) =>
+      log.error("Runner tick failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    await sleep(POLL_INTERVAL_MS);
   }
 }
 
@@ -381,44 +608,7 @@ async function main() {
     );
   }
 
-  const worker = new Worker<AnalysisJobData>(
-    ANALYSIS_QUEUE_NAME,
-    processAnalysis,
-    {
-      connection: redisOpts,
-      concurrency: 2,
-      lockDuration: 10 * 60 * 1000,
-      stalledInterval: 60 * 1000,
-      maxStalledCount: 3,
-    }
-  );
-
-  worker.on("ready", () => {
-    log.info("Worker ready — listening on queue", {
-      queue: ANALYSIS_QUEUE_NAME,
-    });
-  });
-  worker.on("active", (job) => {
-    log.info("Job became active", {
-      analysisId: job.data.analysisId,
-      bullJobId: job.id,
-    });
-  });
-  worker.on("completed", (job) => {
-    log.info("BullMQ marked job completed", {
-      analysisId: job.data.analysisId,
-    });
-  });
-  worker.on("failed", (job, err) => {
-    log.error("BullMQ marked job failed", {
-      analysisId: job?.data.analysisId,
-      error: err.message,
-    });
-  });
-  worker.on("error", (err) => {
-    log.error("Worker error", err.message);
-  });
-
+  void pollLoop();
   log.info("Analysis worker process started, waiting for jobs…");
 }
 

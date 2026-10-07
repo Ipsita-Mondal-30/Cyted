@@ -11,8 +11,16 @@ type ProviderRow = {
   active: boolean;
 };
 
+type JobRunMode = "direct" | "queue";
+
+const JOB_RUN_MODES: { value: JobRunMode; label: string }[] = [
+  { value: "direct", label: "Direct DB" },
+  { value: "queue", label: "Queue worker (Redis)" },
+];
+
 export function AdminProviderToggles() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
+  const [jobRunMode, setJobRunMode] = useState<JobRunMode | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +33,7 @@ export function AdminProviderToggles() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load");
       setProviders(data.providers || []);
+      setJobRunMode(data.jobRunMode ?? "direct");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -36,14 +45,14 @@ export function AdminProviderToggles() {
     load();
   }, []);
 
-  async function toggle(name: string, enabled: boolean) {
-    setSaving(name);
+  async function save(key: string, body: object) {
+    setSaving(key);
     setError(null);
     try {
       const res = await fetch("/api/admin/providers", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabledProviders: { [name]: enabled } }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save");
@@ -55,7 +64,48 @@ export function AdminProviderToggles() {
     }
   }
 
+  const toggle = (name: string, enabled: boolean) =>
+    save(name, { enabledProviders: { [name]: enabled } });
+
   return (
+    <>
+    <section className="mt-10">
+      <h2 className="text-lg font-semibold text-stone-900">Job runner</h2>
+      <p className="mt-1 text-sm text-stone-600">
+        How new analyses reach the worker. Direct DB has the worker poll
+        Postgres and uses no Redis; Queue worker sends jobs through
+        BullMQ/Upstash. The worker picks up a change within a few seconds.
+      </p>
+      {jobRunMode && (
+        <div
+          role="radiogroup"
+          aria-label="Job runner"
+          className="mt-4 inline-flex rounded-lg border border-stone-200 bg-white p-1"
+        >
+          {JOB_RUN_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              role="radio"
+              aria-checked={jobRunMode === m.value}
+              disabled={saving === "jobRunMode"}
+              onClick={() =>
+                jobRunMode !== m.value &&
+                save("jobRunMode", { jobRunMode: m.value })
+              }
+              className={`rounded-md px-4 py-1.5 text-sm font-medium transition disabled:opacity-40 ${
+                jobRunMode === m.value
+                  ? "bg-emerald-600 text-white"
+                  : "text-stone-700 hover:bg-stone-100"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+
     <section className="mt-10">
       <h2 className="text-lg font-semibold text-stone-900">
         Answer engines
@@ -112,5 +162,6 @@ export function AdminProviderToggles() {
         </div>
       )}
     </section>
+    </>
   );
 }

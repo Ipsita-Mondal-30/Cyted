@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
+import { getJobRunMode } from "@/lib/services/provider-settings.service";
 import { enqueueAnalysis } from "@/queue/queue";
 
 const log = createLogger("api:create");
@@ -77,10 +78,17 @@ export async function POST(request: Request) {
       status: analysis.status,
     });
 
-    await enqueueAnalysis(analysis.id);
-    log.info("Analysis handed to BullMQ — ensure `npm run worker` is running", {
-      analysisId: analysis.id,
-    });
+    // Direct mode: the QUEUED row is the job — the worker polls Postgres for it.
+    if ((await getJobRunMode()) === "queue") {
+      await enqueueAnalysis(analysis.id);
+      log.info("Analysis handed to BullMQ — ensure `npm run worker` is running", {
+        analysisId: analysis.id,
+      });
+    } else {
+      log.info("Analysis queued in Postgres (direct mode) — worker will poll it", {
+        analysisId: analysis.id,
+      });
+    }
 
     return NextResponse.json({ jobId: analysis.id });
   } catch (error) {

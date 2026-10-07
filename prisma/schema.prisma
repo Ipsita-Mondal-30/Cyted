@@ -57,6 +57,8 @@ model AnalysisJob {
   companyContext  Json?
   createdAt       DateTime       @default(now())
   completedAt     DateTime?
+  /// Direct-DB runner liveness; stale PROCESSING rows get re-queued.
+  heartbeatAt     DateTime?
 
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -143,5 +145,7 @@ model Recommendation {
 model SystemConfig {
   id                String   @id @default("default")
   enabledProviders  Json     @default("{}")
+  /// "direct" = worker polls Postgres for QUEUED jobs; "queue" = BullMQ/Redis.
+  jobRunMode        String   @default("direct")
   updatedAt         DateTime @updatedAt
 }

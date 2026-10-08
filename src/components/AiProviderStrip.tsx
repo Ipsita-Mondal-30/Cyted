@@ -1,32 +1,31 @@
 "use client";
 
-const PROVIDERS: Array<{
+import { BrandLogo } from "@/components/BrandLogo";
+import { guessDomainFromName } from "@/lib/brand-logo";
+
+export const AI_PROVIDERS: Array<{
   id: string;
   label: string;
-  // Simple recognizable marks via public SVG/CDN
-  src: string;
+  domain: string;
+  color: string;
 }> = [
-  {
-    id: "openai",
-    label: "ChatGPT",
-    src: "https://cdn.simpleicons.org/openai/ffffff",
-  },
-  {
-    id: "gemini",
-    label: "Gemini",
-    src: "https://cdn.simpleicons.org/googlegemini/8E75B2",
-  },
-  {
-    id: "claude",
-    label: "Claude",
-    src: "https://cdn.simpleicons.org/anthropic/D4A27F",
-  },
-  {
-    id: "groq",
-    label: "Groq",
-    src: "https://cdn.simpleicons.org/groq/F55036",
-  },
+  { id: "openai", label: "ChatGPT", domain: "chatgpt.com", color: "#10a37f" },
+  { id: "gemini", label: "Gemini", domain: "gemini.google.com", color: "#8e75b2" },
+  { id: "claude", label: "Claude", domain: "claude.ai", color: "#d4a27f" },
+  { id: "groq", label: "Groq", domain: "groq.com", color: "#f55036" },
 ];
+
+export function providerMeta(provider: string) {
+  const key = provider.toLowerCase();
+  return (
+    AI_PROVIDERS.find((p) => key.includes(p.id)) ?? {
+      id: key,
+      label: provider,
+      domain: guessDomainFromName(provider),
+      color: "#71717a",
+    }
+  );
+}
 
 export function AiProviderStrip({
   providers,
@@ -36,10 +35,10 @@ export function AiProviderStrip({
   className?: string;
 }) {
   const active = providers?.length
-    ? PROVIDERS.filter((p) =>
-        providers.some((x) => x.toLowerCase().includes(p.id))
+    ? AI_PROVIDERS.filter((p) =>
+        providers.some((x) => providerMeta(x).id === p.id)
       )
-    : PROVIDERS;
+    : AI_PROVIDERS;
 
   if (!active.length) return null;
 
@@ -55,15 +54,7 @@ export function AiProviderStrip({
             className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5"
             title={p.label}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={p.src}
-              alt=""
-              width={16}
-              height={16}
-              className="h-4 w-4"
-              loading="lazy"
-            />
+            <BrandLogo name={p.label} domain={p.domain} size={16} />
             <span className="text-xs font-medium text-zinc-200">{p.label}</span>
           </div>
         ))}

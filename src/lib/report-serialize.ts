@@ -33,23 +33,22 @@ export function serializeAnalysisReport(job: JobWithRelations) {
   }
 
   const context = (job.companyContext || {}) as {
-    brandLogos?: Record<string, string>;
     brandDomains?: Record<string, string>;
   };
 
   const competitors = (job.competitors as string[]) || [];
   const brandDomains = context.brandDomains || {};
-  const brandLogos =
-    context.brandLogos ||
-    buildLogoMap({
-      companyName: job.companyName,
-      website: job.website,
-      companyDomain: brandDomains[job.companyName],
-      competitors: competitors.map((name) => ({
-        name,
-        domain: brandDomains[name],
-      })),
-    });
+  // Rebuilt rather than read from companyContext: older jobs stored Clearbit
+  // URLs there, and that service no longer resolves.
+  const brandLogos = buildLogoMap({
+    companyName: job.companyName,
+    website: job.website,
+    companyDomain: brandDomains[job.companyName],
+    competitors: competitors.map((name) => ({
+      name,
+      domain: brandDomains[name],
+    })),
+  });
 
   const providers = [
     ...new Set(

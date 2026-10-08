@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import {
-  faviconUrlFromDomain,
-  hostnameFromUrl,
-  logoUrlFromDomain,
+  domainFromLogoUrl,
   guessDomainFromName,
+  logoUrlFromDomain,
+  normalizeDomain,
 } from "@/lib/brand-logo";
 
 export function BrandLogo({
@@ -24,17 +24,15 @@ export function BrandLogo({
   className?: string;
 }) {
   const host =
-    domain ||
-    hostnameFromUrl(website) ||
-    hostnameFromUrl(logoUrl || undefined) ||
+    normalizeDomain(domain) ||
+    normalizeDomain(website) ||
+    domainFromLogoUrl(logoUrl) ||
     guessDomainFromName(name);
 
-  const primary = logoUrl || logoUrlFromDomain(host, size * 2);
-  const fallback = faviconUrlFromDomain(host, size * 2);
-  const [src, setSrc] = useState(primary);
-  const [failed, setFailed] = useState(false);
+  const src = logoUrlFromDomain(host, Math.min(256, size * 2), name);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
-  if (failed) {
+  if (failedSrc === src) {
     return (
       <span
         className={`inline-flex shrink-0 items-center justify-center rounded-md bg-zinc-800 text-[10px] font-semibold uppercase text-zinc-300 ${className}`}
@@ -49,6 +47,7 @@ export function BrandLogo({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      key={src}
       src={src}
       alt=""
       width={size}
@@ -56,11 +55,8 @@ export function BrandLogo({
       className={`shrink-0 rounded-md bg-white object-contain ${className}`}
       style={{ width: size, height: size }}
       loading="lazy"
-      referrerPolicy="no-referrer"
-      onError={() => {
-        if (src !== fallback) setSrc(fallback);
-        else setFailed(true);
-      }}
+      title={name}
+      onError={() => setFailedSrc(src)}
     />
   );
 }

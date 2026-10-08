@@ -1,5 +1,7 @@
 "use client";
 
+import { RadialGauge } from "@/components/RadialGauge";
+
 export type MetricTone = "poor" | "fair" | "good" | "na";
 
 export function scoreTone(value: number | null | undefined): MetricTone {
@@ -35,16 +37,26 @@ const TONE_STYLES: Record<
   },
 };
 
+export const TONE_COLORS: Record<MetricTone, string> = {
+  poor: "#f87171",
+  fair: "#fbbf24",
+  good: "#34d399",
+  na: "#71717a",
+};
+
 export function InsightMetricCard({
   title,
   description,
   value,
   tone,
+  percent,
 }: {
   title: string;
   description: string;
   value: string;
   tone: MetricTone;
+  /** 0–100; renders a progress ring next to the value when provided. */
+  percent?: number | null;
 }) {
   const styles = TONE_STYLES[tone];
   return (
@@ -66,9 +78,14 @@ export function InsightMetricCard({
           {description}
         </p>
       </div>
-      <p className="mt-6 text-4xl font-semibold tracking-tight text-white">
-        {value}
-      </p>
+      <div className="mt-6 flex items-end justify-between gap-4">
+        <p className="text-4xl font-semibold tracking-tight text-white">
+          {value}
+        </p>
+        {percent != null && (
+          <RadialGauge value={percent} size={56} stroke={6} color={TONE_COLORS[tone]} />
+        )}
+      </div>
     </div>
   );
 }

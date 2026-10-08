@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ScoreBar, VisibilityTrendChart } from "@/components/VisibilityTrendChart";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
@@ -11,6 +13,15 @@ export default async function DashboardListPage() {
     include: { metrics: { select: { visibilityScore: true } } },
     take: 50,
   });
+
+  const trend = jobs
+    .flatMap((j) =>
+      j.metrics
+        ? [{ id: j.id, label: j.companyName, date: j.createdAt, score: j.metrics.visibilityScore }]
+        : []
+    )
+    .slice(0, 20)
+    .reverse();
 
   return (
     <div className="min-h-screen bg-zinc-50 text-stone-900">
@@ -25,6 +36,8 @@ export default async function DashboardListPage() {
             New analysis
           </Link>
         </div>
+
+        <VisibilityTrendChart points={trend} />
 
         {jobs.length === 0 ? (
           <p className="text-stone-600">
@@ -42,17 +55,27 @@ export default async function DashboardListPage() {
                   href={`/dashboard/${job.id}`}
                   className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-stone-50"
                 >
-                  <div>
-                    <p className="font-medium text-stone-900">{job.companyName}</p>
-                    <p className="text-xs text-stone-500">
-                      {job.createdAt.toLocaleString()} · {job.status}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <BrandLogo
+                      name={job.companyName}
+                      website={job.website}
+                      size={32}
+                      className="border border-stone-200"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-stone-900">{job.companyName}</p>
+                      <p className="text-xs text-stone-500">
+                        {job.createdAt.toLocaleString()} · {job.status}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right text-sm text-stone-600">
-                    {job.metrics
-                      ? `Visibility ${job.metrics.visibilityScore.toFixed(1)}`
-                      : job.progressMessage || "—"}
-                  </div>
+                  {job.metrics ? (
+                    <ScoreBar score={job.metrics.visibilityScore} />
+                  ) : (
+                    <span className="text-right text-sm text-stone-600">
+                      {job.progressMessage || "—"}
+                    </span>
+                  )}
                 </Link>
               </li>
             ))}

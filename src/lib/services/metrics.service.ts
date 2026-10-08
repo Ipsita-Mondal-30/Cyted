@@ -1,16 +1,12 @@
 import { prisma } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
+import {
+  brandMatches,
+  rankingScore,
+  VISIBILITY_WEIGHTS,
+} from "@/lib/report-analytics";
 
 const log = createLogger("service:metrics");
-
-function brandMatches(name: string, brands: string[]): boolean {
-  const target = name.toLowerCase().trim();
-  if (!target) return false;
-  return brands.some((b) => {
-    const brand = b.toLowerCase().trim();
-    return brand === target || brand.includes(target) || target.includes(brand);
-  });
-}
 
 export async function calculateAndStoreMetrics(
   analysisId: string,
@@ -110,14 +106,12 @@ export async function calculateAndStoreMetrics(
       : null;
 
   // Visibility: weighted blend of mention, SoV, recommendation, citation
-  const rankingScore =
-    avgRanking == null ? 0 : Math.max(0, 1 - (avgRanking - 1) / 10);
   const visibilityScore =
-    mentionRate * 0.35 +
-    shareOfVoice * 0.25 +
-    recommendationRate * 0.25 +
-    citationRate * 0.1 +
-    rankingScore * 0.05;
+    mentionRate * VISIBILITY_WEIGHTS.mentionRate +
+    shareOfVoice * VISIBILITY_WEIGHTS.shareOfVoice +
+    recommendationRate * VISIBILITY_WEIGHTS.recommendationRate +
+    citationRate * VISIBILITY_WEIGHTS.citationRate +
+    rankingScore(avgRanking) * VISIBILITY_WEIGHTS.ranking;
 
   const competitorShare: Record<string, number> = {};
   for (const [brand, count] of Object.entries(brandCounts)) {

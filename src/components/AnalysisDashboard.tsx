@@ -1,8 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AiProviderStrip } from "@/components/AiProviderStrip";
+import { AI_PROVIDERS, AiProviderStrip, providerMeta } from "@/components/AiProviderStrip";
 import { BrandLogo } from "@/components/BrandLogo";
+import {
+  BrandEngineHeatmap,
+  CategoryBreakdown,
+  EngineComparison,
+  RankDistribution,
+  SentimentChart,
+  ShareOfVoiceDonut,
+  VisibilityBreakdown,
+} from "@/components/ReportCharts";
 import { ContentSuggestions } from "@/components/ContentSuggestions";
 import { CopyReportLink } from "@/components/CopyReportLink";
 import {
@@ -12,6 +21,7 @@ import {
 } from "@/components/InsightMetricCard";
 import { MarkdownReport } from "@/components/MarkdownReport";
 import { ReportRankingHero } from "@/components/ReportRankingHero";
+import { computeReportAnalytics } from "@/lib/report-analytics";
 import {
   parseRecommendationContent,
   type ContentSuggestion,
@@ -209,6 +219,7 @@ export function AnalysisDashboard({
         description: `${brand} is mentioned in ${fmt(m.mentionRate)}% of responses in your category.`,
         value: `${fmt(m.visibilityScore)}`,
         tone: scoreTone(m.visibilityScore) as MetricTone,
+        percent: m.visibilityScore,
       },
       {
         title: "Positive Sentiment",
@@ -221,18 +232,21 @@ export function AnalysisDashboard({
           positive == null
             ? ("na" as MetricTone)
             : (scoreTone(positive) as MetricTone),
+        percent: positive,
       },
       {
         title: "Citation Share",
         description: `${brand} is cited in ${fmt(m.citationRate)}% of responses in your category.`,
         value: `${fmt(m.citationRate)}%`,
         tone: scoreTone(m.citationRate) as MetricTone,
+        percent: m.citationRate,
       },
       {
         title: "Recommendation Rate",
         description: `Assistants recommend ${brand} in ${fmt(m.recommendationRate)}% of tracked answers.`,
         value: `${fmt(m.recommendationRate)}%`,
         tone: scoreTone(m.recommendationRate) as MetricTone,
+        percent: m.recommendationRate,
       },
     ];
   }, [results?.metrics, brand]);
@@ -255,6 +269,31 @@ export function AnalysisDashboard({
       website: name === brand ? results?.website : null,
     }));
   }, [results, brand]);
+
+  const logoFor = useCallback(
+    (name: string) => ({
+      domain: results?.brandDomains?.[name],
+      logoUrl: results?.brandLogos?.[name],
+      website: name === brand ? results?.website : null,
+    }),
+    [results, brand]
+  );
+
+  const prompts = results?.prompts;
+  const analytics = useMemo(() => {
+    if (!prompts?.length) return null;
+    const heatmapBrands = [...rankingRows]
+      .sort((a, b) => (b.isYou ? 1 : 0) - (a.isYou ? 1 : 0) || b.share - a.share)
+      .slice(0, 8)
+      .map((r) => r.name);
+    const computed = computeReportAnalytics(prompts, brand, heatmapBrands);
+    const order = (p: string) => {
+      const i = AI_PROVIDERS.findIndex((x) => x.id === providerMeta(p).id);
+      return i === -1 ? AI_PROVIDERS.length : i;
+    };
+    computed.providers.sort((a, b) => order(a.provider) - order(b.provider));
+    return computed;
+  }, [prompts, rankingRows, brand]);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-black text-zinc-100">
@@ -403,56 +442,40 @@ export function AnalysisDashboard({
               </div>
             </section>
 
-            <section className="grid gap-4 sm:grid-cols-3">
-              <MiniStat
-                label="Share of voice"
-                value={`${fmt(results.metrics.shareOfVoice)}%`}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <VisibilityBreakdown
+                visibilityScore={results.metrics.visibilityScore}
+                tone={scoreTone(results.metrics.visibilityScore)}
+                mentionRate={results.metrics.mentionRate}
+                shareOfVoice={results.metrics.shareOfVoice}
+                recommendationRate={results.metrics.recommendationRate}
+                citationRate={results.metrics.citationRate}
+                avgRanking={results.metrics.avgRanking}
               />
-              <MiniStat
-                label="Mention rate"
-                value={`${fmt(results.metrics.mentionRate)}%`}
-              />
-              <MiniStat
-                label="Avg ranking"
-                value={
-                  results.metrics.avgRanking == null
-                    ? "—"
-                    : fmt(results.metrics.avgRanking)
-                }
-              />
-            </section>
+              <ShareOfVoiceDonut rows={rankingRows} logoFor={logoFor} />
+            </div>
 
-            <section className="border border-zinc-800 bg-zinc-950/60 p-5">
-              <h2 className="font-sans text-lg font-semibold text-white">
-                Competitor share of voice
-              </h2>
-              <div className="mt-4 space-y-3">
-                {Object.entries(results.metrics.competitorShare || {})
-                  .filter(([k]) => !k.startsWith("__"))
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([name, share]) => (
-                    <div key={name} className="flex items-center gap-3 text-sm">
-                      <BrandLogo
-                        name={name}
-                        domain={results.brandDomains?.[name]}
-                        logoUrl={results.brandLogos?.[name]}
-                        website={name === brand ? results.website : null}
-                        size={24}
-                      />
-                      <span className="w-36 truncate text-zinc-300">{name}</span>
-                      <div className="h-1.5 flex-1 rounded-full bg-zinc-800">
-                        <div
-                          className="h-full rounded-full bg-emerald-500/80"
-                          style={{ width: `${Math.min(100, share * 100)}%` }}
-                        />
-                      </div>
-                      <span className="w-14 text-right tabular-nums text-zinc-500">
-                        {(share * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </section>
+            {analytics && (
+              <>
+                <EngineComparison providers={analytics.providers} brand={brand} />
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <SentimentChart sentiment={analytics.sentiment} brand={brand} />
+                  <RankDistribution
+                    buckets={analytics.rankBuckets}
+                    avgRanking={results.metrics.avgRanking}
+                  />
+                </div>
+
+                <CategoryBreakdown categories={analytics.categories} brand={brand} />
+
+                <BrandEngineHeatmap
+                  rows={analytics.heatmap}
+                  providers={analytics.providers}
+                  logoFor={logoFor}
+                />
+              </>
+            )}
 
             {parsedRec.contentSuggestions.length > 0 && (
               <ContentSuggestions suggestions={parsedRec.contentSuggestions} />
@@ -530,19 +553,6 @@ export function AnalysisDashboard({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border border-zinc-800 bg-zinc-950/60 px-4 py-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-        {label}
-      </p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-white">
-        {value}
-      </p>
     </div>
   );
 }

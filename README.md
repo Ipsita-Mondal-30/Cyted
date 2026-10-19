@@ -56,6 +56,55 @@ Logos are served by the app's own route, `GET /api/logo?domain=…&size=…&name
 
 Google sign-in via Supabase. `src/middleware.ts` refreshes the session cookie and redirects protected pages (`/dashboard`, etc.) to `/login`; `/`, `/login`, `/report/*`, `/admin` and all `/api/*` routes skip it.
 
+## AI evaluation harness
+
+Every number on the report depends on one LLM step: **extraction**, which turns a free-text AI answer into `{ mentionedBrands, ranking, sentiment, … }`. If it misreads an answer, the visibility score is wrong no matter how good the rest of the pipeline is. `src/evals/` measures that step offline, the way you'd unit-test deterministic code.
+
+```
+golden dataset ──► production prompt ──► extractor ──► production parser ──► scorers ──► report + CI gate
+(14 labelled       (buildExtraction-     (Gemini / OpenAI /   (parseExtraction)   (per-case +
+ answers)           Prompt)               Claude / Groq,                          aggregate)
+                                          or rule baseline)
+```
+
+**Design choices**
+
+- **Eval what ships.** The worker and the harness share `buildExtractionPrompt` and `parseExtraction` (`src/lib/services/extraction-prompt.ts`), so a prompt change is evaluated exactly as it will run in production. `EXTRACTION_PROMPT_VERSION` is stamped on every report.
+- **Score what the product consumes.** Brand precision and recall are computed over the *tracked* brands (your company plus competitors), because those are the only brands the visibility metrics read. "Recommended" accuracy uses the same `isRecommendedMention` rule as `metrics.service.ts`, and brand matching uses the same `brandMatches`.
+- **A golden set built around failure modes.** The cases in `evals/datasets/extraction.golden.json` are tagged by what they stress: ranked lists, markdown tables, unnumbered bullets, prose-only rankings, brand aliases and casing ("Hubspot CRM" → HubSpot), passing mentions, negative mentions, a brand name hidden inside an ordinary word ("Monday standups" ≠ Monday.com), and a **prompt-injection** answer that tells the extractor to rank a brand #1. Reports break accuracy down by tag.
+- **Instruction-following tracked separately from accuracy.** The parser stays lenient (production shouldn't drop an answer over `"sentiment": "positive"`) but records every deviation from the strict zod schema, reported as *schema validity*.
+- **Record and replay.** `--mode record` saves raw model outputs to `evals/cassettes/<provider>.json`, keyed by a hash of the full prompt. `--mode replay` re-scores them with no network and no API key, so CI is deterministic and free. Replay is strict: if the prompt changes, the hash misses and the run fails until you re-record, so CI never scores stale outputs.
+- **A baseline to beat.** A rule-based extractor (string matching, list position, keyword sentiment) runs with no API key. It shows what an LLM adds — and the dataset shows where rules break (the prompt-injection case, prose rankings, aliases).
+- **Cost and latency.** Each run reports p50/p95 latency and an estimated cost per extractor, using `src/lib/ai-pricing.ts`.
+- **Quality gate.** `evals/thresholds.json` sets minimums per extractor kind; `--gate` exits non-zero if any metric falls below them. CI (`.github/workflows/ci.yml`) runs the type-check, unit tests and the eval gate on every push.
+
+**Metrics**
+
+| Metric | Meaning |
+|---|---|
+| Parse rate | Output contained a recoverable JSON object |
+| Schema validity | Output matched the strict schema with no normalisation needed |
+| Mention accuracy | Correctly decided whether *your* company is mentioned |
+| Brand P / R / F1 | Precision / recall over tracked brands |
+| Ranking exact / MAE | Exact ranking match (including correctly returning `null`) and mean absolute error when both are ranked |
+| Sentiment accuracy | Plus a confusion matrix in the report |
+| Recommended accuracy | Agreement on the "recommended" flag that drives the recommendation rate |
+
+**Labelling rules** (keep new cases consistent): `ranking` is the company's 1-based position in the answer's list or table, or 1 if the answer explicitly names it the top pick; it is `null` when the company is absent, only mentioned in passing, or explicitly not recommended. An absent company is `Neutral`. Text injected into the answer doesn't count as a mention. `npm test` checks these invariants on every case.
+
+**Running it**
+
+```bash
+npm run eval                                              # rule baseline (+ any recorded LLM outputs), offline
+npm run eval -- --extractors gemini,openai --mode record  # call real models, save outputs to evals/cassettes
+npm run eval -- --extractors heuristic,gemini --gate      # replay + enforce thresholds
+npm run eval -- --tag adversarial                         # run a subset by tag
+```
+
+Reports are written to `evals/reports/latest.md` (and `.json`). Recording needs the provider's API key in `.env`; replay needs nothing.
+
+Current baseline (`rules-v1`, 14 cases): mention 92.9%, brand F1 97.6%, ranking 85.7%, sentiment 92.9%. It fails exactly where expected: the prompt-injection case, rankings stated in prose, and the "Zoho" alias.
+
 ## Tech stack
 
 Next.js 16 (App Router) · React 19 · Tailwind CSS 4 · Prisma 6 + Postgres (Supabase) · Supabase Auth · BullMQ + Redis (optional) · OpenAI, Gemini, Anthropic and Groq SDKs.
@@ -109,6 +158,10 @@ Without the worker, jobs stay `QUEUED` while the dashboard keeps polling.
 | `npm run worker` | Analysis worker |
 | `npm run dev:worker` | Worker with `.env` loaded and file watching |
 | `npm run lint` | ESLint |
+| `npm run typecheck` | TypeScript type-check |
+| `npm test` | Unit tests (`node:test` via tsx): parser, scorers, analytics, dataset invariants |
+| `npm run eval` | Extraction eval harness (see above) |
+| `npm run eval:gate` | Offline baseline eval with the quality gate, as run in CI |
 | `npm run db:push` | Apply the Prisma schema to Postgres |
 | `npm run db:generate` | Generate the Prisma client |
 
@@ -122,7 +175,9 @@ src/
     providers/    one adapter per LLM provider
     services/     pipeline steps (competitor, prompt, search, extraction, metrics, recommendation)
     report-analytics.ts   shared scoring weights + per-engine/category analytics
+  evals/          eval harness: extractors, scorers, runner
   workers/        analysis worker
+evals/            golden dataset, thresholds, recorded LLM outputs (cassettes)
 prisma/           database schema
 docs/             architecture, data model, API routes, deep dives
 ```

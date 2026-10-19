@@ -16,6 +16,19 @@ export function rankingScore(avgRanking: number | null): number {
   return avgRanking == null ? 0 : Math.max(0, 1 - (avgRanking - 1) / 10);
 }
 
+/** A response "recommends" the brand when it mentions it positively or ranks it top 3. */
+export function isRecommendedMention(
+  companyHit: boolean,
+  sentiment: string | null | undefined,
+  ranking: number | null | undefined
+): boolean {
+  return (
+    companyHit &&
+    ((sentiment || "").toLowerCase() === "positive" ||
+      (ranking != null && ranking > 0 && ranking <= 3))
+  );
+}
+
 export function brandMatches(name: string, brands: string[]): boolean {
   const target = name.toLowerCase().trim();
   if (!target) return false;

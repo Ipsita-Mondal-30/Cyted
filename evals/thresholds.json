@@ -1,0 +1,20 @@
+{
+  "llm": {
+    "parseRate": 1,
+    "schemaValidity": 0.9,
+    "mentionAccuracy": 0.9,
+    "trackedBrandF1": 0.9,
+    "rankingExact": 0.75,
+    "sentimentAccuracy": 0.75,
+    "recommendedAccuracy": 0.85
+  },
+  "heuristic": {
+    "parseRate": 1,
+    "schemaValidity": 1,
+    "mentionAccuracy": 0.9,
+    "trackedBrandF1": 0.95,
+    "rankingExact": 0.8,
+    "sentimentAccuracy": 0.9,
+    "recommendedAccuracy": 0.95
+  }
+}

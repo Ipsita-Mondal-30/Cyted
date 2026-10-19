@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm test
+
+      # Offline and deterministic: the rule-based baseline plus any LLM outputs
+      # recorded in evals/cassettes. No API keys or network calls to model providers.
+      - name: Extraction eval gate
+        run: |
+          extractors=heuristic
+          for id in gemini openai claude groq; do
+            if [ -f "evals/cassettes/$id.json" ]; then extractors="$extractors,$id"; fi
+          done
+          npm run eval -- --extractors "$extractors" --mode replay --gate
+
+      - name: Publish eval report
+        if: always()
+        run: |
+          if [ -f evals/reports/latest.md ]; then cat evals/reports/latest.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: evals/reports/
+          if-no-files-found: ignore

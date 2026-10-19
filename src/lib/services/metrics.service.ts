@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
 import {
   brandMatches,
+  isRecommendedMention,
   rankingScore,
   VISIBILITY_WEIGHTS,
 } from "@/lib/report-analytics";
@@ -78,10 +79,7 @@ export async function calculateAndStoreMetrics(
     if (companyHit && sentiment === "positive") {
       positiveMentionHits += 1;
     }
-    const isRecommended =
-      companyHit &&
-      (sentiment === "positive" || (row.ranking != null && row.ranking <= 3));
-    if (isRecommended) {
+    if (isRecommendedMention(companyHit, sentiment, row.ranking)) {
       recommendationHits += 1;
     }
   }
